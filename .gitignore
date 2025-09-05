@@ -1,0 +1,21 @@
+.DS_Store
+/node_modules/
+
+# React Router
+/.react-router/
+/build/
+
+# Background process temp files
+/tmp/
+
+# Local helper config (do not commit)
+tmux-urls.cfg
+
+# Local environment files (keep examples)
+.env*
+!.env.example
+
+# Pack artifacts (npm pack)
+cc-viz-*.tgz
+
+test-results/.last-run.json
