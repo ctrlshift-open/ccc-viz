@@ -225,10 +225,23 @@ export default function SessionDetails() {
   const location = useLocation();
 
   const [items, setItems] = useState(data.parsed);
+  const [seenLines, setSeenLines] = useState<Set<number>>(() => new Set((data.parsed || []).map((p: any) => p.line as number)));
+  const seenLinesRef = useRef<Set<number>>(seenLines);
   const [nextCursor, setNextCursor] = useState<string | null>(data.meta.nextCursor);
   const [dir, setDir] = useState<Dir>(data.meta.dir);
   const [showLegend, setShowLegend] = useState(false);
   const [useAdaptiveColors, setUseAdaptiveColors] = useState(true);
+  const [totals, setTotals] = useState(data.totals);
+  const [messageCostScale, setMessageCostScale] = useState(data.messageCostScale);
+  type Cat = { key: string; label: string; count: number };
+  const [catOptions, setCatOptions] = useState<Cat[]>(data.categories || []);
+  const [metaTotal, setMetaTotal] = useState<number>(data.meta.total);
+  const [liveConnected, setLiveConnected] = useState<boolean>(false);
+  const [isStopped, setIsStopped] = useState<boolean>(false);
+  const [activeReason, setActiveReason] = useState<string | null>(null);
+  const [activeThresholdSec] = useState<number>(1800);
+  const [lastEventTimestamp, setLastEventTimestamp] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState<number>(Date.now());
   const condensed = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     return sp.get("view") === "condensed";
@@ -311,22 +324,173 @@ export default function SessionDetails() {
     });
   };
 
-  // Reset items when dir or session changes
+  // Reset view state when dir or session changes
   useEffect(() => {
     setItems(data.parsed);
+    const initialSeen = new Set((data.parsed || []).map((p: any) => p.line as number));
+    setSeenLines(initialSeen);
+    seenLinesRef.current = initialSeen;
     setNextCursor(data.meta.nextCursor);
     setDir(data.meta.dir);
+    setTotals(data.totals);
+    setMessageCostScale(data.messageCostScale);
+    setCatOptions(data.categories || []);
+    setMetaTotal(data.meta.total);
   }, [data.sessionId, data.meta.dir]);
 
   // Append newly fetched items
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data && (fetcher.data as any).parsed) {
-      const incoming = (fetcher.data as any).parsed as typeof data.parsed;
+      const incomingAll = (fetcher.data as any).parsed as typeof data.parsed;
+      // Deduplicate by line number
+      const filtered = incomingAll.filter((it: any) => !seenLinesRef.current.has(it.line as number));
+      if (filtered.length === 0) return;
       const next = (fetcher.data as any).meta?.nextCursor as string | null;
-      setItems((prev) => [...prev, ...incoming]);
+      setItems((prev) => [...prev, ...filtered]);
+      setSeenLines((prev) => {
+        const s = new Set(prev);
+        for (const it of filtered) s.add(it.line as number);
+        seenLinesRef.current = s;
+        return s;
+      });
       setNextCursor(next);
     }
   }, [fetcher.state, fetcher.data]);
+
+  // Live updates via SSE stream with backoff and status
+  const streamUrl = useMemo(() => {
+    // Use initial total from loader to seed tailer only on first connect
+    return `/api/sessions/${encodeURIComponent(data.project)}/${encodeURIComponent(
+      data.sessionId
+    )}/stream?fromLine=${encodeURIComponent(String(data.meta.total))}&dir=${encodeURIComponent(dir)}`;
+  }, [data.project, data.sessionId, dir, data.meta.total]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let es: EventSource | null = null;
+    let closed = false;
+    let retry = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastActivityAt = Date.now();
+
+    const onAppend = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as { items?: any[] };
+        if (!payload?.items || !Array.isArray(payload.items) || payload.items.length === 0) return;
+        // Deduplicate by line number
+        const newOnes = (payload.items as any[]).filter((it) => typeof it?.line === "number" && !seenLinesRef.current.has(it.line));
+        if (newOnes.length === 0) return;
+        setItems((prev) => (dir === "desc" ? [...newOnes, ...prev] : [...prev, ...newOnes]));
+        setSeenLines((prev) => {
+          const s = new Set(prev);
+          for (const it of newOnes) s.add(it.line);
+          seenLinesRef.current = s;
+          return s;
+        });
+        setMetaTotal((t) => (typeof t === "number" ? t + newOnes.length : t));
+        lastActivityAt = Date.now();
+        setIsStopped(false);
+        setActiveReason("recent-write");
+        // Update last event timestamp using newest payload item timestamp when available
+        try {
+          const items = newOnes || [];
+          let latest: number | null = null;
+          for (const it of items) {
+            if (!it || !it.ok) continue;
+            const ts = (it.value as any)?.timestamp;
+            const t = ts ? new Date(ts).getTime() : NaN;
+            if (Number.isFinite(t)) { latest = latest == null ? t : Math.max(latest, t); }
+          }
+          if (latest != null) setLastEventTimestamp(new Date(latest).toISOString());
+          else setLastEventTimestamp(new Date().toISOString());
+        } catch {}
+      } catch {}
+    };
+
+    const connect = () => {
+      if (closed) return;
+      try { if (es) { es.close(); es = null; } } catch {}
+      const next = new EventSource(streamUrl);
+      es = next;
+      next.onopen = () => {
+        setLiveConnected(true);
+        retry = 0;
+      };
+      next.addEventListener("append", onAppend);
+      next.onerror = () => {
+        setLiveConnected(false);
+        try { next.removeEventListener("append", onAppend); } catch {}
+        try { next.close(); } catch {}
+        es = null;
+        const base = 1000;
+        const max = 20000;
+        const delay = Math.min(max, base * Math.pow(2, retry++)) + Math.floor(Math.random() * 300);
+        if (!closed) {
+          timer = setTimeout(connect, delay);
+        }
+      };
+    };
+    connect();
+
+    return () => {
+      closed = true;
+      if (timer) { try { clearTimeout(timer); } catch {} timer = null; }
+      if (es) { try { es.removeEventListener("append", onAppend); } catch {} try { es.close(); } catch {} }
+    };
+  }, [streamUrl, dir]);
+
+  // Poll session active state periodically
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    const poll = () => {
+      const url = `/api/sessions/${encodeURIComponent(data.project)}/${encodeURIComponent(data.sessionId)}/active?thresholdSec=${activeThresholdSec}`;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((res) => {
+          if (cancelled) return;
+          if (typeof res.reason === "string") setActiveReason(res.reason);
+          if (typeof res.lastEventTimestamp === "string") setLastEventTimestamp(res.lastEventTimestamp);
+          if (typeof res.lastEventIsStop === "boolean") setIsStopped(res.lastEventIsStop);
+        })
+        .catch(() => { /* ignore */ });
+    };
+    poll();
+    const id = setInterval(poll, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [data.project, data.sessionId, activeThresholdSec]);
+
+  // Live counter for time since last message
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      setNowTick(Date.now());
+      timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 1000);
+    return () => { if (timer) clearTimeout(timer); };
+  }, []);
+
+  const sinceLastMessageMs = useMemo(() => {
+    if (!lastEventTimestamp) return null;
+    const t = new Date(lastEventTimestamp).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.max(0, nowTick - t);
+  }, [lastEventTimestamp, nowTick]);
+
+  function formatElapsed(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
 
   const nextUrl = useMemo(() => {
     if (nextCursor == null) return null;
@@ -365,16 +529,15 @@ export default function SessionDetails() {
     return `?${params.toString()}`;
   };
 
-  // Category options from loader (full session scan)
-  type Cat = { key: string; label: string; count: number };
-  const catOptions: Cat[] = data.categories || [];
+  // Category options (from initial load or recompute)
+  const catOptionsMemo = catOptions;
 
   // Build expanded map from selectedCats for convenience and pass down
   const categoryExpanded = useMemo(() => {
     const map: Record<string, boolean> = {};
-    for (const c of catOptions) map[c.key] = selectedCats.has(c.key);
+    for (const c of catOptionsMemo) map[c.key] = selectedCats.has(c.key);
     return map;
-  }, [catOptions, selectedCats]);
+  }, [catOptionsMemo, selectedCats]);
 
   const categoryVersion = catsParam; // string token to notify children of change
 
@@ -394,11 +557,29 @@ export default function SessionDetails() {
   const setAllCategoriesUrl = (expanded: boolean) => {
     if (!expanded) return buildCatsUrl(new Set());
     const all = new Set<string>();
-    for (const c of catOptions) all.add(c.key);
+    for (const c of catOptionsMemo) all.add(c.key);
     return buildCatsUrl(all);
   };
 
-  const messageScaleUsed = useAdaptiveColors ? (data as any).messageCostScale : undefined;
+  const messageScaleUsed = useAdaptiveColors ? (messageCostScale as any) : undefined;
+
+  const totalsFetcher = useFetcher<any>();
+  const recomputeTotals = () => {
+    const path = `/api/sessions/${encodeURIComponent(data.project)}/${encodeURIComponent(data.sessionId)}/totals`;
+    totalsFetcher.load(path);
+  };
+
+  useEffect(() => {
+    if (totalsFetcher.state === "idle" && totalsFetcher.data) {
+      const d = totalsFetcher.data as any;
+      if (d && !d.error) {
+        if (typeof d.totalLines === "number") setMetaTotal(d.totalLines);
+        if (d.totals) setTotals(d.totals);
+        if (d.messageCostScale) setMessageCostScale(d.messageCostScale);
+        if (Array.isArray(d.categories)) setCatOptions(d.categories);
+      }
+    }
+  }, [totalsFetcher.state, totalsFetcher.data]);
 
   return (
     <main className="p-4 max-w-screen-md mx-auto overflow-x-hidden">
@@ -408,10 +589,10 @@ export default function SessionDetails() {
       </p>
       <div className="mb-3 text-sm text-gray-400 flex flex-wrap items-center gap-3">
         <span>
-          Total cost: <strong style={{ color: costColorHex(data.totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(data.totals?.totalUSD as number | undefined)}</strong>
+          Total cost: <strong style={{ color: costColorHex(totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(totals?.totalUSD as number | undefined)}</strong>
           <span className="mx-2 text-gray-600">|</span>
-          tokens in {typeof data.totals?.inputTokens === "number" ? data.totals!.inputTokens : "—"}
-          {" "}· out {typeof data.totals?.outputTokens === "number" ? data.totals!.outputTokens : "—"}
+          tokens in {typeof totals?.inputTokens === "number" ? totals!.inputTokens : "—"}
+          {" "}· out {typeof totals?.outputTokens === "number" ? totals!.outputTokens : "—"}
         </span>
         <button type="button" className="text-blue-500 hover:underline" onClick={() => setShowLegend((s) => !s)}>
           {showLegend ? "Hide legend" : "Show legend"}
@@ -420,6 +601,33 @@ export default function SessionDetails() {
           <input type="checkbox" checked={useAdaptiveColors} onChange={toggleAdaptive} />
           <span>Adaptive colors</span>
         </label>
+        <button
+          type="button"
+          onClick={recomputeTotals}
+          className="text-blue-500 hover:underline"
+          disabled={totalsFetcher.state !== "idle"}
+          title="Recompute totals, categories, and cost scale"
+        >
+          {totalsFetcher.state === "idle" ? "Recompute totals" : "Recomputing…"}
+        </button>
+        <span className="ml-auto inline-flex items-center gap-3">
+          <span className="inline-flex items-center gap-1" title={liveConnected ? "Live connected" : "Live disconnected"}>
+            <span className={`inline-block h-2.5 w-2.5 rounded-full ${liveConnected ? "bg-green-500" : "bg-red-500"}`}></span>
+            <span className="text-xs">Live</span>
+          </span>
+          {isStopped ? (
+            <span className="inline-flex items-center gap-1" title={activeReason || "stopped"}>
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-500"></span>
+              <span className="text-xs">Stopped</span>
+            </span>
+          ) : null}
+        </span>
+      </div>
+      <div className="mb-3 text-xs text-gray-400">
+        <span className="inline-flex items-center gap-1">
+          <span className="text-gray-500">Since last message:</span>
+          <span>{sinceLastMessageMs != null ? formatElapsed(sinceLastMessageMs) : "—"}</span>
+        </span>
       </div>
       {showLegend ? (
         <div className="mb-3 text-xs text-gray-300 border border-gray-700 bg-gray-900 rounded p-2">
@@ -441,7 +649,7 @@ export default function SessionDetails() {
       <div className="mb-4 flex flex-wrap gap-4 items-center">
         <Link to={`/${encodeURIComponent(data.project)}/sessions`} className="text-blue-600 hover:underline">← Back to sessions</Link>
         <Link to="/" className="text-blue-600 hover:underline">Back to projects</Link>
-        <span className="text-sm text-gray-600">Total lines: {data.meta.total}</span>
+        <span className="text-sm text-gray-600">Total lines: {metaTotal}</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <span className="text-sm">Sort:</span>
           <Link

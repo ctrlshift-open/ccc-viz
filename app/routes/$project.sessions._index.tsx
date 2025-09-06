@@ -1,7 +1,7 @@
 import type { Route } from "./+types/$project.sessions._index";
 import { Link, useLoaderData } from "react-router";
 // Note: server-only Node imports are loaded dynamically inside the loader
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatUSD, costColorHex } from "~/utils/format";
 
 
@@ -84,6 +84,18 @@ export default function ProjectSessions() {
   const [sessionScale, setSessionScale] = useState<{ greenMax: number; yellowMax: number; redMax?: number } | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [useAdaptiveColors, setUseAdaptiveColors] = useState(true);
+  const [statusById, setStatusById] = useState<Record<string, { stopped: boolean; lastEventTimestamp: string | null }>>({});
+  const [nowTick, setNowTick] = useState<number>(Date.now());
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      setNowTick(Date.now());
+      timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 1000);
+    return () => { if (timer) clearTimeout(timer); };
+  }, []);
 
   useEffect(() => {
     if (data.sessions.length === 0) return;
@@ -148,6 +160,21 @@ export default function ProjectSessions() {
     }
   }, [data.sessions, data.project]);
 
+  // Fetch stopped status and last event timestamps for sessions
+  useEffect(() => {
+    if (data.sessions.length === 0) return;
+    const ids = data.sessions.map((s) => s.id).join(",");
+    let cancelled = false;
+    fetch(`/api/sessions/${encodeURIComponent(data.project)}/active-status?ids=${ids}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((res: Record<string, { stopped: boolean; lastEventTimestamp: string | null }>) => {
+        if (cancelled) return;
+        setStatusById(res || {});
+      })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [data.sessions, data.project]);
+
   // Lazy-load costs (project total + per-session)
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +208,20 @@ export default function ProjectSessions() {
   };
 
   const scaleUsed = useAdaptiveColors ? sessionScale ?? undefined : undefined;
+
+  const formatElapsed = (ms: number): string => {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  };
 
   return (
     <main className="p-4 max-w-6xl mx-auto">
@@ -231,6 +272,14 @@ export default function ProjectSessions() {
             const preview = previews[s.id];
             const isLoading = loading && !preview;
 
+            const status = statusById[s.id];
+            const stopped = status?.stopped;
+            const lastTs = status?.lastEventTimestamp;
+            const sinceMs = lastTs ? (() => {
+              const t = new Date(lastTs).getTime();
+              return Number.isFinite(t) ? Math.max(0, nowTick - t) : null;
+            })() : null;
+
             return (
               <Link
                 key={s.filename}
@@ -241,10 +290,15 @@ export default function ProjectSessions() {
                   <SessionSkeleton />
                 ) : preview ? (
                   <div>
-                    <div className="font-medium text-gray-100 mb-2 line-clamp-2">
-                      {preview.firstMessage}
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="font-medium text-gray-100 line-clamp-2">
+                        {preview.firstMessage}
+                      </div>
+                      {stopped ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700 text-gray-200 border border-gray-500 shrink-0">Stopped</span>
+                      ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-4 text-xs text-gray-400">
+                    <div className="flex flex-wrap gap-4 text-xs text-gray-400 items-center">
                       <span>{s.modified}</span>
                       {preview.gitBranch && (
                         <span className="flex items-center gap-1">
@@ -257,16 +311,27 @@ export default function ProjectSessions() {
                       <span>{preview.totalMessages} 💬</span>
                       <span style={{ color: costColorHex(sessionCosts[s.id] as number | undefined, scaleUsed) }}>{formatUSD(sessionCosts[s.id] as number | undefined)}</span>
                       <span className="text-[10px] text-gray-500">{s.id}</span>
+                      <span className="ml-auto text-gray-400">
+                        <span className="text-gray-500">Last msg:</span> {sinceMs != null ? formatElapsed(sinceMs) : "—"}
+                      </span>
                     </div>
                   </div>
                 ) : (
                   <div>
-                    <div className="font-medium text-gray-100 mb-2">
-                      {s.id}
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="font-medium text-gray-100">
+                        {s.id}
+                      </div>
+                      {stopped ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700 text-gray-200 border border-gray-500 shrink-0">Stopped</span>
+                      ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-4 text-xs text-gray-400">
+                    <div className="flex flex-wrap gap-4 text-xs text-gray-400 items-center">
                       <span>{s.modified}</span>
                       <span style={{ color: costColorHex(sessionCosts[s.id] as number | undefined, scaleUsed) }}>{formatUSD(sessionCosts[s.id] as number | undefined)}</span>
+                      <span className="ml-auto text-gray-400">
+                        <span className="text-gray-500">Last msg:</span> {sinceMs != null ? formatElapsed(sinceMs) : "—"}
+                      </span>
                     </div>
                   </div>
                 )}
