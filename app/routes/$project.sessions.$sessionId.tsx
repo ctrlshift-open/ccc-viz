@@ -1,7 +1,7 @@
 // Note: server-only Node imports are loaded dynamically within the loader
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Link, useFetcher, useLoaderData, useLocation } from "react-router";
+import { Link, useFetcher, useLoaderData, useLocation, useNavigate } from "react-router";
 import { MessageTypeIcon, getMessageTypeIcon } from "~/components/MessageTypeIcon";
 import type { Route } from "./+types/$project.sessions.$sessionId";
 import { formatUSD, costColorHex } from "~/utils/format";
@@ -156,6 +156,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       let cacheCreationTokens = 0;
       let cacheReadTokens = 0;
       const allMessageCosts: number[] = [];
+      let currentCtx: { used: number; limit?: number; pct?: number } | undefined;
+      let foundPrimary = false;
+      // First pass: aggregate and remember last assistant with usage/model
       for (const line of allLines) {
         try {
           const v = JSON.parse(line);
@@ -171,6 +174,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
           if (typeof u.cache_creation_input_tokens === "number") cacheCreationTokens += u.cache_creation_input_tokens;
           if (typeof u.cache_read_input_tokens === "number") cacheReadTokens += u.cache_read_input_tokens;
+          // Track latest assistant usage; prefer primary (not sidechain) if available
+          if (v?.type === "assistant" && v?.message?.model && (u?.input_tokens || u?.cache_creation_input_tokens || u?.cache_read_input_tokens)) {
+            const isSide = Boolean(v?.isSidechain);
+            const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+            // If we haven't found a primary, update. If this is primary, mark and set.
+            if (!foundPrimary || !isSide) {
+              currentCtx = { used };
+              if (!isSide) foundPrimary = true;
+              (currentCtx as any).model = v.message.model;
+            }
+          }
         } catch {}
       }
       totals = { totalUSD, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
@@ -190,6 +204,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         const redMax = Math.max(p90 + 1e-9, max);
         messageCostScale = { greenMax: p50, yellowMax: p90, redMax };
       }
+      // Resolve context limit for the chosen currentCtx
+      if (currentCtx && (currentCtx as any).model) {
+        try {
+          const res = await fetcher.getModelContextLimit((currentCtx as any).model);
+          const limit = res && res.type === "Success" && typeof res.value === "number" ? res.value : undefined;
+          if (limit && limit > 0) currentCtx = { used: currentCtx.used, limit, pct: currentCtx.used / limit };
+        } catch {}
+      }
+      (globalThis as any)._ccvizCurrentCtx = currentCtx; // debug aid
     } catch {
       // If ccusage import fails, continue without cost info
     }
@@ -204,6 +227,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       meta: { total, limit, cursor: start, nextCursor, dir },
       totals,
       messageCostScale,
+      currentCtx: (globalThis as any)._ccvizCurrentCtx,
     };
   } catch (error) {
     return {
@@ -223,6 +247,7 @@ export default function SessionDetails() {
   const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof loader>();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [items, setItems] = useState(data.parsed);
   const [seenLines, setSeenLines] = useState<Set<number>>(() => new Set((data.parsed || []).map((p: any) => p.line as number)));
@@ -233,6 +258,7 @@ export default function SessionDetails() {
   const [useAdaptiveColors, setUseAdaptiveColors] = useState(true);
   const [totals, setTotals] = useState(data.totals);
   const [messageCostScale, setMessageCostScale] = useState(data.messageCostScale);
+  const [currentCtx, setCurrentCtx] = useState<{ used: number; limit?: number; pct?: number } | undefined>((data as any).currentCtx);
   type Cat = { key: string; label: string; count: number };
   const [catOptions, setCatOptions] = useState<Cat[]>(data.categories || []);
   const [metaTotal, setMetaTotal] = useState<number>(data.meta.total);
@@ -242,6 +268,17 @@ export default function SessionDetails() {
   const [activeThresholdSec] = useState<number>(1800);
   const [lastEventTimestamp, setLastEventTimestamp] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
+  const [pendingDir, setPendingDir] = useState<Dir | null>(null);
+  const selectedDir = useMemo<Dir>(() => {
+    const sp = new URLSearchParams(location.search);
+    const d = (sp.get("dir") as Dir) || data.meta.dir || "desc";
+    const current = d === "asc" ? "asc" : "desc";
+    return pendingDir ?? current;
+  }, [location.search, data.meta.dir, pendingDir]);
+  useEffect(() => {
+    // Clear any optimistic selection once URL changes
+    setPendingDir(null);
+  }, [location.search]);
   const condensed = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     return sp.get("view") === "condensed";
@@ -354,6 +391,21 @@ export default function SessionDetails() {
         return s;
       });
       setNextCursor(next);
+
+      // Update current context if any incoming assistant message has usage + model
+      try {
+        for (const it of filtered) {
+          if (!it?.ok) continue;
+          const v: any = it.value;
+          const u = v?.message?.usage || {};
+          const model = v?.message?.model;
+          if (v?.type === 'assistant' && model && (u.input_tokens || u.cache_creation_input_tokens || u.cache_read_input_tokens)) {
+            const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+            // Optimistically set used; limit will update on next totals refresh
+            setCurrentCtx((prev) => ({ used, limit: prev?.limit, pct: prev?.limit ? used / prev.limit : undefined }));
+          }
+        }
+      } catch {}
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -577,6 +629,7 @@ export default function SessionDetails() {
         if (d.totals) setTotals(d.totals);
         if (d.messageCostScale) setMessageCostScale(d.messageCostScale);
         if (Array.isArray(d.categories)) setCatOptions(d.categories);
+        if (d.currentCtx) setCurrentCtx(d.currentCtx);
       }
     }
   }, [totalsFetcher.state, totalsFetcher.data]);
@@ -588,11 +641,29 @@ export default function SessionDetails() {
         Project: <strong>{data.project}</strong> · Session: <strong>{data.sessionId}</strong>
       </p>
       <div className="mb-3 text-sm text-gray-400 flex flex-wrap items-center gap-3">
-        <span>
-          Total cost: <strong style={{ color: costColorHex(totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(totals?.totalUSD as number | undefined)}</strong>
-          <span className="mx-2 text-gray-600">|</span>
-          tokens in {typeof totals?.inputTokens === "number" ? totals!.inputTokens : "—"}
-          {" "}· out {typeof totals?.outputTokens === "number" ? totals!.outputTokens : "—"}
+        <span className="inline-flex items-center gap-2">
+          <span>
+            Total cost: <strong style={{ color: costColorHex(totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(totals?.totalUSD as number | undefined)}</strong>
+          </span>
+          <span className="text-gray-600">|</span>
+          <span>
+            tokens in {typeof totals?.inputTokens === "number" ? totals!.inputTokens : "—"}
+            {" "}· out {typeof totals?.outputTokens === "number" ? totals!.outputTokens : "—"}
+          </span>
+          {currentCtx && typeof currentCtx.used === 'number' ? (
+            <>
+              <span className="text-gray-600">|</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="text-xs text-gray-500">Context</span>
+                <ContextIndicator ctx={currentCtx} />
+                {currentCtx.limit ? (
+                  <span className="text-[10px] text-gray-500">{currentCtx.used}/{currentCtx.limit}</span>
+                ) : (
+                  <span className="text-[10px] text-gray-500">{currentCtx.used}</span>
+                )}
+              </span>
+            </>
+          ) : null}
         </span>
         <button type="button" className="text-blue-500 hover:underline" onClick={() => setShowLegend((s) => !s)}>
           {showLegend ? "Hide legend" : "Show legend"}
@@ -647,21 +718,41 @@ export default function SessionDetails() {
         </div>
       ) : null}
       <div className="mb-4 flex flex-wrap gap-4 items-center">
-        <Link to={`/${encodeURIComponent(data.project)}/sessions`} className="text-blue-600 hover:underline">← Back to sessions</Link>
-        <Link to="/" className="text-blue-600 hover:underline">Back to projects</Link>
+        <Link
+          to={`/${encodeURIComponent(data.project)}/sessions`}
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(`/${encodeURIComponent(data.project)}/sessions`);
+          }}
+          className="text-blue-600 hover:underline"
+        >
+          ← Back to sessions
+        </Link>
+        <Link
+          to="/"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(`/`);
+          }}
+          className="text-blue-600 hover:underline"
+        >
+          Back to projects
+        </Link>
         <span className="text-sm text-gray-600">Total lines: {metaTotal}</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <span className="text-sm">Sort:</span>
           <Link
             to={toggleUrl("desc")}
-            className={dir === "desc" ? "font-semibold underline" : "text-blue-600 hover:underline"}
+            onClick={() => setPendingDir("desc")}
+            className={selectedDir === "desc" ? "font-semibold underline" : "text-blue-600 hover:underline"}
           >
             Desc
           </Link>
           <span className="text-gray-300">|</span>
           <Link
             to={toggleUrl("asc")}
-            className={dir === "asc" ? "font-semibold underline" : "text-blue-600 hover:underline"}
+            onClick={() => setPendingDir("asc")}
+            className={selectedDir === "asc" ? "font-semibold underline" : "text-blue-600 hover:underline"}
           >
             Asc
           </Link>
@@ -809,6 +900,25 @@ function SafePre({ children, className = "" }: { children: string; className?: s
   );
 }
 
+function ContextIndicator({ ctx }: { ctx?: { used?: number; limit?: number; pct?: number } }) {
+  if (!ctx || typeof ctx.used !== "number" || !ctx.limit || !ctx.pct) return null;
+  const pct = Math.max(0, Math.min(1, ctx.pct));
+  const pct100 = Math.round(pct * 100);
+  const color = pct > 0.8 ? "#ef4444" : pct > 0.5 ? "#f59e0b" : "#22c55e"; // red / amber / green
+  return (
+    <span className="inline-flex items-center gap-1" title={`context ${ctx.used}/${ctx.limit} tokens (${pct100}%)`}>
+      <span className="text-[10px] text-gray-500">ctx</span>
+      <span className="relative inline-block h-1 w-16 rounded bg-gray-700 overflow-hidden align-middle">
+        <span
+          className="absolute left-0 top-0 h-1"
+          style={{ width: `${pct100}%`, backgroundColor: color }}
+        />
+      </span>
+      <span className="text-[10px] text-gray-400">{pct100}%</span>
+    </span>
+  );
+}
+
 function looksLikeMarkdown(text: string): boolean {
   if (!text) return false;
   if (text.includes("```")) return true; // fenced code
@@ -949,11 +1059,13 @@ function EntryCard({
       ) : null}
       {/* Token usage (assistant messages only, when present) */}
       {topType === "assistant" && v?.message?.usage ? (
-        <span className="text-gray-500 truncate">
-          tokens: in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+        <span className="text-gray-500 truncate inline-flex items-center gap-1">
+          <span>
+            tokens: in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+          </span>
           {typeof v?.costUSD === "number" ? (
             <>
-              <span className="text-gray-600"> · </span>
+              <span className="text-gray-600">·</span>
               <span style={{ color: costColorHex(v.costUSD as number, messageCostScale) }}>cost {formatUSD(v.costUSD)}</span>
             </>
           ) : null}
@@ -1289,11 +1401,13 @@ function EntryCard({
           <span className="text-xs text-gray-500">{new Date(currentTimestamp).toLocaleTimeString()}</span>
         ) : null}
         {topType === "assistant" && v?.message?.usage ? (
-          <span className="text-[10px] text-gray-400">
-            tok in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+          <span className="text-[10px] text-gray-400 inline-flex items-center gap-1">
+            <span>
+              tok in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+            </span>
             {typeof v?.costUSD === "number" ? (
               <>
-                <span className="text-gray-600"> · </span>
+                <span className="text-gray-600">·</span>
                 <span style={{ color: costColorHex(v.costUSD as number, messageCostScale) }}>{formatUSD(v.costUSD)}</span>
               </>
             ) : null}
@@ -1329,14 +1443,17 @@ function EntryCard({
             <span className="text-xs text-gray-500 truncate">{new Date(currentTimestamp).toLocaleTimeString()}</span>
           ) : null}
           {topType === "assistant" && v?.message?.usage ? (
-            <span className="text-[11px] text-gray-400 truncate">
-              tok in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+            <span className="text-[11px] text-gray-400 truncate inline-flex items-center gap-1">
+              <span>
+                tok in {v.message.usage.input_tokens ?? "—"} · out {v.message.usage.output_tokens ?? "—"}
+              </span>
               {typeof v?.costUSD === "number" ? (
                 <>
-                  <span className="text-gray-600"> · </span>
+                  <span className="text-gray-600">·</span>
                   <span style={{ color: costColorHex(v.costUSD as number, messageCostScale) }}>{formatUSD(v.costUSD)}</span>
                 </>
               ) : null}
+              <ContextIndicator ctx={(v as any)?.ctxUsage} />
             </span>
           ) : null}
         </button>
