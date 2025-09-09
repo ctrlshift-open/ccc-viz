@@ -21,6 +21,7 @@ export default function Home() {
   const [projectCosts, setProjectCosts] = useState<Record<string, number>>({});
   const [projectScales, setProjectScales] = useState<Record<string, { greenMax: number; yellowMax: number; redMax?: number } | undefined>>({});
   const [useAdaptiveColors, setUseAdaptiveColors] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     try {
@@ -36,6 +37,27 @@ export default function Home() {
       return next;
     });
   };
+
+  // Fuzzy search function
+  const fuzzyMatch = (query: string, text: string): boolean => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    
+    // Check if all characters from query appear in text in order
+    let queryIndex = 0;
+    for (let i = 0; i < t.length && queryIndex < q.length; i++) {
+      if (t[i] === q[queryIndex]) {
+        queryIndex++;
+      }
+    }
+    return queryIndex === q.length;
+  };
+
+  // Filter projects based on search query
+  const filteredProjects = data.projects?.filter(p => 
+    fuzzyMatch(searchQuery, p.name)
+  ) || [];
 
   useEffect(() => {
     let cancelled = false;
@@ -73,10 +95,29 @@ export default function Home() {
       <p className="text-sm text-gray-500 mb-4 break-all">
         Source: {data.dir}
       </p>
+      
+      {/* Search input */}
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Search projects (fuzzy match)..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        {searchQuery && (
+          <p className="text-sm text-gray-500 mt-1">
+            Showing {filteredProjects.length} of {data.projects?.length || 0} projects
+          </p>
+        )}
+      </div>
+
       {data.error ? (
         <div className="text-red-600">{data.error}</div>
-      ) : data.projects.length === 0 ? (
-        <div className="text-gray-600">No projects found.</div>
+      ) : filteredProjects.length === 0 ? (
+        <div className="text-gray-600">
+          {searchQuery ? `No projects matching "${searchQuery}"` : "No projects found."}
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <div className="mb-3 text-sm text-gray-400">
@@ -94,7 +135,7 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {data.projects.map((p) => (
+              {filteredProjects.map((p) => (
                 <tr key={p.name} className="border-b border-gray-100">
                   <td className="py-2 pr-4 font-medium">
                     <Link to={`/${encodeURIComponent(p.name)}/sessions`} className="text-blue-600 hover:underline">
