@@ -12,6 +12,30 @@ type ParsedLine =
 
 type Dir = "asc" | "desc";
 
+function formatProjectTitle(projectPath: string): string {
+  // Extract project name from path like '-Users-barendt-code-archeology'
+  // Replace 'code-' prefix with just the project name
+  const segments = projectPath.split('-').filter(Boolean);
+
+  // Find 'code' segment and take everything after it
+  const codeIndex = segments.indexOf('code');
+  if (codeIndex >= 0 && codeIndex < segments.length - 1) {
+    return segments.slice(codeIndex + 1).join('-');
+  }
+
+  // Fallback: return the original path
+  return projectPath;
+}
+
+export function meta({ data }: Route.MetaArgs) {
+  if (!data || 'error' in data) {
+    return [{ title: "ccc-viz" }];
+  }
+
+  const projectTitle = formatProjectTitle(data.project);
+  return [{ title: `${projectTitle}` }];
+}
+
 export async function loader({ request, params }: Route.LoaderArgs) {
   const project = params.project!;
   const sessionId = params.sessionId!;
@@ -145,7 +169,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           try {
             const cost = await calculateCostForEntry(v, "auto", fetcher);
             if (typeof v === "object" && v) v.costUSD = cost;
-          } catch {}
+          } catch { }
         })
       );
 
@@ -168,7 +192,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
               totalUSD += cost;
               if (cost > 0) allMessageCosts.push(cost);
             }
-          } catch {}
+          } catch { }
           const u = (v?.message?.usage ?? {}) as any;
           if (typeof u.input_tokens === "number") inputTokens += u.input_tokens;
           if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
@@ -185,7 +209,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
               (currentCtx as any).model = v.message.model;
             }
           }
-        } catch {}
+        } catch { }
       }
       totals = { totalUSD, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
       // Build dynamic message cost scale using p50 and p90
@@ -210,7 +234,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           const res = await fetcher.getModelContextLimit((currentCtx as any).model);
           const limit = res && res.type === "Success" && typeof res.value === "number" ? res.value : undefined;
           if (limit && limit > 0) currentCtx = { used: currentCtx.used, limit, pct: currentCtx.used / limit };
-        } catch {}
+        } catch { }
       }
       (globalThis as any)._ccvizCurrentCtx = currentCtx; // debug aid
     } catch {
@@ -269,6 +293,13 @@ export default function SessionDetails() {
   const [lastEventTimestamp, setLastEventTimestamp] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const [pendingDir, setPendingDir] = useState<Dir | null>(null);
+
+  // Update document title when status changes
+  useEffect(() => {
+    const statusEmoji = isStopped ? '🔴' : '🟢';
+    const projectTitle = formatProjectTitle(data.project);
+    document.title = `${statusEmoji} ${projectTitle}`;
+  }, [isStopped, data.project]);
   const selectedDir = useMemo<Dir>(() => {
     const sp = new URLSearchParams(location.search);
     const d = (sp.get("dir") as Dir) || data.meta.dir || "desc";
@@ -303,13 +334,13 @@ export default function SessionDetails() {
     try {
       const raw = localStorage.getItem(`ccviz:adaptiveColors:${data.project}`);
       if (raw != null) setUseAdaptiveColors(raw === "true");
-    } catch {}
+    } catch { }
   }, [data.project]);
 
   const toggleAdaptive = () => {
     setUseAdaptiveColors((prev) => {
       const next = !prev;
-      try { localStorage.setItem(`ccviz:adaptiveColors:${data.project}`, String(next)); } catch {}
+      try { localStorage.setItem(`ccviz:adaptiveColors:${data.project}`, String(next)); } catch { }
       return next;
     });
   };
@@ -405,7 +436,7 @@ export default function SessionDetails() {
             setCurrentCtx((prev) => ({ used, limit: prev?.limit, pct: prev?.limit ? used / prev.limit : undefined }));
           }
         }
-      } catch {}
+      } catch { }
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -455,13 +486,13 @@ export default function SessionDetails() {
           }
           if (latest != null) setLastEventTimestamp(new Date(latest).toISOString());
           else setLastEventTimestamp(new Date().toISOString());
-        } catch {}
-      } catch {}
+        } catch { }
+      } catch { }
     };
 
     const connect = () => {
       if (closed) return;
-      try { if (es) { es.close(); es = null; } } catch {}
+      try { if (es) { es.close(); es = null; } } catch { }
       const next = new EventSource(streamUrl);
       es = next;
       next.onopen = () => {
@@ -471,8 +502,8 @@ export default function SessionDetails() {
       next.addEventListener("append", onAppend);
       next.onerror = () => {
         setLiveConnected(false);
-        try { next.removeEventListener("append", onAppend); } catch {}
-        try { next.close(); } catch {}
+        try { next.removeEventListener("append", onAppend); } catch { }
+        try { next.close(); } catch { }
         es = null;
         const base = 1000;
         const max = 20000;
@@ -486,8 +517,8 @@ export default function SessionDetails() {
 
     return () => {
       closed = true;
-      if (timer) { try { clearTimeout(timer); } catch {} timer = null; }
-      if (es) { try { es.removeEventListener("append", onAppend); } catch {} try { es.close(); } catch {} }
+      if (timer) { try { clearTimeout(timer); } catch { } timer = null; }
+      if (es) { try { es.removeEventListener("append", onAppend); } catch { } try { es.close(); } catch { } }
     };
   }, [streamUrl, dir]);
 
@@ -636,7 +667,9 @@ export default function SessionDetails() {
 
   return (
     <main className="p-4 max-w-screen-md mx-auto overflow-x-hidden">
-      <h1 className="text-xl font-semibold mb-2">Session Details</h1>
+      <h1 className="text-xl font-semibold mb-2">
+        {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)} - Session Details
+      </h1>
       <p className="text-sm text-gray-500 mb-4 break-all">
         Project: <strong>{data.project}</strong> · Session: <strong>{data.sessionId}</strong>
       </p>
@@ -821,25 +854,25 @@ export default function SessionDetails() {
             // In desc order, the "previous" message in time is actually the next item in the array
             const isDesc = data.meta.dir === 'desc';
             const prevIdx = isDesc ? idx + 1 : idx - 1;
-            const prevTimestamp = prevIdx >= 0 && prevIdx < items.length && items[prevIdx].ok ? 
+            const prevTimestamp = prevIdx >= 0 && prevIdx < items.length && items[prevIdx].ok ?
               (items[prevIdx].value as any)?.timestamp : null;
             const currentTimestamp = item.ok ? (item.value as any)?.timestamp : null;
-            
-          return (
-            <EntryCard
-              key={item.line}
-              item={item}
-              idx={idx}
-              condensed={condensed}
-              categoryExpanded={categoryExpanded}
-              categoryVersion={categoryVersion}
-              onManualToggle={handleManualToggle}
-              manualOpenUuids={manualOpenUuids}
-              previousTimestamp={prevTimestamp}
-              currentTimestamp={currentTimestamp}
-              messageCostScale={messageScaleUsed as any}
-            />
-          );
+
+            return (
+              <EntryCard
+                key={item.line}
+                item={item}
+                idx={idx}
+                condensed={condensed}
+                categoryExpanded={categoryExpanded}
+                categoryVersion={categoryVersion}
+                onManualToggle={handleManualToggle}
+                manualOpenUuids={manualOpenUuids}
+                previousTimestamp={prevTimestamp}
+                currentTimestamp={currentTimestamp}
+                messageCostScale={messageScaleUsed as any}
+              />
+            );
           })}
 
           <div ref={sentinelRef} className="py-6 text-center text-sm text-gray-500">
@@ -877,16 +910,16 @@ function formatDuration(ms: number): string {
 
 function getModelEmoji(model: string | undefined): string {
   if (!model) return "";
-  
+
   // Opus models (most expensive/capable)
   if (model.includes("opus")) return "💎";
-  
+
   // Sonnet models - omit
   if (model.includes("sonnet")) return "";
-  
+
   // Haiku models (fast/cheap)
   if (model.includes("haiku")) return "⚡";
-  
+
   // All other models
   return "❓";
 }
@@ -1190,23 +1223,23 @@ function EntryCard({
         const cleanedContent = seg
           .replace(/<local-command-stdout>/g, '')
           .replace(/<\/local-command-stdout>/g, '');
-        
+
         // Parse lines and add colors to Unicode blocks
         const lines = cleanedContent.split('\n');
-        
+
         return (
-          <div 
-            key={i} 
+          <div
+            key={i}
             className="font-mono text-xs bg-gray-950 text-gray-100 p-4 rounded border border-gray-800 overflow-x-auto"
           >
-{lines.map((line, lineIdx) => {
+            {lines.map((line, lineIdx) => {
               // Check if line has Unicode blocks
               if (line.includes('⛁') || line.includes('⛀') || line.includes('⛶')) {
                 // Parse the line character by character to properly handle ANSI sequences
                 let result = '';
                 let currentColor = '';
                 let i = 0;
-                
+
                 // Map ANSI RGB colors to CSS colors (exact RGB from terminal)
                 const colorMap: Record<string, string> = {
                   '38;2;8;145;178': 'rgb(8, 145, 178)', // cyan/blue
@@ -1215,7 +1248,7 @@ function EntryCard({
                   '38;2;147;51;234': 'rgb(147, 51, 234)', // purple
                   '38;2;153;153;153': 'rgb(153, 153, 153)', // light gray
                 };
-                
+
                 while (i < line.length) {
                   // Check for ANSI escape sequence
                   if (line[i] === '\u001b' && line[i + 1] === '[') {
@@ -1224,11 +1257,11 @@ function EntryCard({
                     while (j < line.length && line[j] !== 'm') {
                       j++;
                     }
-                    
+
                     if (j < line.length) {
                       // Extract the ANSI code
                       const ansiCode = line.slice(i + 2, j);
-                      
+
                       // Check if it's a color code we care about
                       if (colorMap[ansiCode]) {
                         currentColor = colorMap[ansiCode];
@@ -1236,7 +1269,7 @@ function EntryCard({
                         // Reset color
                         currentColor = '';
                       }
-                      
+
                       i = j + 1; // Skip past the 'm'
                     } else {
                       i++;
@@ -1257,11 +1290,11 @@ function EntryCard({
                     i++;
                   }
                 }
-                
+
                 return (
-                  <div 
-                    key={lineIdx} 
-                    dangerouslySetInnerHTML={{ __html: result }} 
+                  <div
+                    key={lineIdx}
+                    dangerouslySetInnerHTML={{ __html: result }}
                     className="whitespace-pre"
                   />
                 );
