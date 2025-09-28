@@ -856,15 +856,8 @@ export default function SessionDetails() {
         >
           ← Back to sessions
         </Link>
-        <Link
-          to="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/`);
-          }}
-          className="text-blue-600 hover:underline"
-        >
-          Back to projects
+        <Link to="/" className="text-blue-600 hover:underline">
+          ← Back to projects
         </Link>
         <span className="text-sm text-gray-600">Total lines: {metaTotal}</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">

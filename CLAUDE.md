@@ -50,6 +50,52 @@ Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:
 
 ## Development Guidelines
 
+### React Router 7 SSR Module Boundaries (CRITICAL)
+
+**NEVER import Node.js modules at the top level of route files.** This causes "Module has been externalized for browser compatibility" errors during client-side navigation.
+
+❌ **WRONG:**
+```typescript
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+export async function loader() {
+  const data = await readFile(join(...));
+  return data;
+}
+```
+
+✅ **CORRECT:**
+```typescript
+export async function loader() {
+  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const data = await readFile(join(...));
+  return data;
+}
+```
+
+**Rule:** All Node.js imports (`node:*`, `fs`, `path`, etc.) must be dynamically imported inside loader/action functions using `await import()`. Top-level imports are included in both server AND client bundles, causing runtime errors in the browser.
+
+**Applies to:**
+- `node:fs`, `node:path`, `node:os`, `node:child_process`, etc.
+- Any server-only modules ending in `.server.ts`
+- Database clients, file system operations, subprocess spawning
+
+### Debugging Navigation Issues
+
+When users report navigation or UI problems:
+
+1. **ALWAYS use Playwright first** to capture browser console errors - don't ask the user for screenshots
+2. **Check both server logs AND browser console** - many errors only appear client-side
+3. **Test client-side navigation specifically** - page reloads can mask SSR issues
+4. **Look for "externalized for browser compatibility" errors** - indicates server modules in client bundle
+
+Example Playwright debugging command:
+```typescript
+Task: "Navigate to [URL] and check for console errors. Take screenshots before and after navigation."
+```
+
 ### Adding New Routes
 Create files in `app/routes/` following the naming convention:
 - Use `$` prefix for dynamic segments (e.g., `$project.tsx`)
