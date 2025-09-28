@@ -36,6 +36,75 @@ export function meta({ data }: Route.MetaArgs) {
   return [{ title: `${projectTitle}` }];
 }
 
+export async function action({ request, params }: Route.ActionArgs) {
+  const project = params.project!;
+  const sessionId = params.sessionId!;
+  const formData = await request.formData();
+  const prompt = formData.get("prompt");
+  const model = formData.get("model");
+
+  if (!prompt || typeof prompt !== "string") {
+    return { success: false, error: "Prompt is required", output: "", exitCode: 1 };
+  }
+
+  const { resolveSessionFile } = await import("~/utils/path-safety.server");
+  const { file } = resolveSessionFile(project, sessionId);
+  const { readFile } = await import("node:fs/promises");
+
+  let workingDirectory = "/";
+  try {
+    console.log("[action] Reading session file:", file);
+    const content = await readFile(file, "utf8");
+    const lines = content.split("\n").filter(l => l.trim());
+    console.log("[action] File has", lines.length, "lines");
+
+    // Scan first 20 lines to find one with cwd
+    for (let i = 0; i < Math.min(20, lines.length); i++) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (parsed.cwd && typeof parsed.cwd === "string") {
+          workingDirectory = parsed.cwd;
+          console.log("[action] Found cwd in line", i + 1, ":", workingDirectory);
+          break;
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+
+    if (workingDirectory === "/") {
+      console.log("[action] No cwd field found in first 20 lines");
+    }
+  } catch (error) {
+    console.error("[action] Failed to read cwd from session file:", error);
+  }
+
+  // Run CLI in background without awaiting
+  const { sendPromptToSession } = await import("~/claude-cli.server");
+  console.log("[action] Starting background CLI execution for session:", sessionId);
+  console.log("[action] Working directory:", workingDirectory);
+  console.log("[action] Prompt:", prompt.slice(0, 100));
+
+  sendPromptToSession(sessionId, prompt, {
+    model: model && typeof model === "string" ? model : undefined,
+    printMode: true,
+    workingDirectory,
+  }).then((result) => {
+    console.log("[action] CLI execution completed:", result.success ? "success" : "failed");
+    if (!result.success) {
+      console.error("[action] CLI execution failed:", result.error);
+      console.error("[action] CLI output:", result.output);
+    } else {
+      console.log("[action] CLI output length:", result.output.length);
+    }
+  }).catch((error) => {
+    console.error("[action] CLI execution threw error:", error);
+  });
+
+  // Return immediately
+  return { success: true, message: "Prompt sent to Claude CLI", output: "", exitCode: 0 };
+}
+
 export async function loader({ request, params }: Route.LoaderArgs) {
   const project = params.project!;
   const sessionId = params.sessionId!;
@@ -274,6 +343,7 @@ export default function SessionDetails() {
   const navigate = useNavigate();
 
   const [items, setItems] = useState(data.parsed);
+  const [pendingPrompts, setPendingPrompts] = useState<Array<{ id: string; text: string; timestamp: string }>>([]);
   const [seenLines, setSeenLines] = useState<Set<number>>(() => new Set((data.parsed || []).map((p: any) => p.line as number)));
   const seenLinesRef = useRef<Set<number>>(seenLines);
   const [nextCursor, setNextCursor] = useState<string | null>(data.meta.nextCursor);
@@ -460,10 +530,25 @@ export default function SessionDetails() {
       try {
         const payload = JSON.parse(ev.data) as { items?: any[] };
         if (!payload?.items || !Array.isArray(payload.items) || payload.items.length === 0) return;
+        console.log("[SSE] Received", payload.items.length, "items");
         // Deduplicate by line number
         const newOnes = (payload.items as any[]).filter((it) => typeof it?.line === "number" && !seenLinesRef.current.has(it.line));
+        console.log("[SSE] After dedup:", newOnes.length, "new items");
         if (newOnes.length === 0) return;
-        setItems((prev) => (dir === "desc" ? [...newOnes, ...prev] : [...prev, ...newOnes]));
+
+        // Check if any new messages are user messages - if so, clear pending prompts FIRST
+        const hasUserMessage = newOnes.some((it) => it.ok && (it.value as any)?.type === "user");
+        if (hasUserMessage) {
+          console.log("[SSE] User message received, clearing pending prompts");
+          setPendingPrompts([]);
+        }
+
+        console.log("[SSE] Adding", newOnes.length, "items. Dir:", dir, "Current items:", items.length);
+        setItems((prev) => {
+          const updated = dir === "desc" ? [...newOnes, ...prev] : [...prev, ...newOnes];
+          console.log("[SSE] Items after update:", updated.length);
+          return updated;
+        });
         setSeenLines((prev) => {
           const s = new Set(prev);
           for (const it of newOnes) s.add(it.line);
@@ -493,14 +578,23 @@ export default function SessionDetails() {
     const connect = () => {
       if (closed) return;
       try { if (es) { es.close(); es = null; } } catch { }
+      console.log("[SSE] Connecting to:", streamUrl);
       const next = new EventSource(streamUrl);
       es = next;
       next.onopen = () => {
+        console.log("[SSE] Connected");
         setLiveConnected(true);
         retry = 0;
       };
       next.addEventListener("append", onAppend);
-      next.onerror = () => {
+      next.addEventListener("ready", (e) => {
+        console.log("[SSE] Stream ready");
+      });
+      next.addEventListener("ping", () => {
+        console.log("[SSE] Ping received");
+      });
+      next.onerror = (err) => {
+        console.error("[SSE] Error:", err);
         setLiveConnected(false);
         try { next.removeEventListener("append", onAppend); } catch { }
         try { next.close(); } catch { }
@@ -508,6 +602,7 @@ export default function SessionDetails() {
         const base = 1000;
         const max = 20000;
         const delay = Math.min(max, base * Math.pow(2, retry++)) + Math.floor(Math.random() * 300);
+        console.log("[SSE] Reconnecting in", delay, "ms");
         if (!closed) {
           timer = setTimeout(connect, delay);
         }
@@ -843,12 +938,38 @@ export default function SessionDetails() {
         </div>
       ) : null}
 
+      <PromptForm
+        onPromptSubmit={(text) => {
+          const pending = {
+            id: `pending-${Date.now()}`,
+            text,
+            timestamp: new Date().toISOString(),
+          };
+          setPendingPrompts((prev) => [...prev, pending]);
+        }}
+      />
+
       {data.error ? (
         <div className="text-red-600">{data.error}</div>
       ) : items.length === 0 ? (
         <div className="text-gray-600">No JSON lines found.</div>
       ) : (
         <div className={condensed ? "flex flex-wrap gap-2" : "grid gap-3"}>
+          {dir === "desc" && pendingPrompts.map((pending) => (
+            <div
+              key={pending.id}
+              className="rounded border border-gray-600 bg-black p-2 sm:p-3 text-white opacity-50 animate-pulse"
+            >
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                <span className="px-2 py-0.5 rounded border text-xs bg-gray-50 text-gray-700 border-gray-200">user</span>
+                <span className="text-gray-400">{new Date(pending.timestamp).toLocaleTimeString()}</span>
+                <span className="text-gray-500 text-xs">Sending...</span>
+              </div>
+              <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+                {pending.text}
+              </div>
+            </div>
+          ))}
           {items.map((item, idx) => {
             // Get previous item's timestamp for duration calculation
             // In desc order, the "previous" message in time is actually the next item in the array
@@ -874,6 +995,21 @@ export default function SessionDetails() {
               />
             );
           })}
+          {dir === "asc" && pendingPrompts.map((pending) => (
+            <div
+              key={pending.id}
+              className="rounded border border-gray-600 bg-black p-2 sm:p-3 text-white opacity-50 animate-pulse"
+            >
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                <span className="px-2 py-0.5 rounded border text-xs bg-gray-50 text-gray-700 border-gray-200">user</span>
+                <span className="text-gray-400">{new Date(pending.timestamp).toLocaleTimeString()}</span>
+                <span className="text-gray-500 text-xs">Sending...</span>
+              </div>
+              <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+                {pending.text}
+              </div>
+            </div>
+          ))}
 
           <div ref={sentinelRef} className="py-6 text-center text-sm text-gray-500">
             {nextCursor ? (fetcher.state === "idle" ? "Load more…" : "Loading…") : "End of results"}
@@ -1508,6 +1644,78 @@ function EntryCard({
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void }) {
+  const fetcher = useFetcher<typeof action>();
+  const [prompt, setPrompt] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isSubmitting = fetcher.state === "submitting";
+  const result = fetcher.data;
+
+  useEffect(() => {
+    if (result?.success && fetcher.state === "idle") {
+      setPrompt("");
+    }
+  }, [result, fetcher.state]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim() || isSubmitting) return;
+    const promptText = prompt;
+    onPromptSubmit(promptText);
+    fetcher.submit({ prompt: promptText }, { method: "post" });
+
+    // Fallback: clear this specific prompt after 10 seconds if it's still pending
+    setTimeout(() => {
+      console.log("[PromptForm] Timeout reached, checking for stale pending prompts");
+    }, 10000);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  };
+
+  return (
+    <div className="rounded border border-blue-800 bg-blue-950/30 p-4 mb-4">
+      <h2 className="text-sm font-semibold text-gray-200 mb-3">Send Prompt to Claude</h2>
+      <form onSubmit={handleSubmit}>
+        <textarea
+          ref={textareaRef}
+          name="prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Enter your prompt... (Cmd+Enter to submit)"
+          disabled={isSubmitting}
+          className="w-full min-h-24 p-3 rounded border border-gray-600 bg-gray-900 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y disabled:opacity-50 disabled:cursor-not-allowed"
+          rows={3}
+        />
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-400">
+            Tip: Press Cmd+Enter to submit
+          </div>
+          <button
+            type="submit"
+            disabled={!prompt.trim() || isSubmitting}
+            className="px-4 py-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSubmitting ? "Sending..." : "Send to Claude"}
+          </button>
+        </div>
+        {result && fetcher.state === "idle" && !result.success && (
+          <div className="mt-3 text-sm text-red-400 border border-red-800 bg-red-950/30 rounded p-3">
+            <div className="font-semibold mb-1">Error:</div>
+            <div>{result.error || "Failed to send prompt"}</div>
+          </div>
+        )}
+      </form>
     </div>
   );
 }
