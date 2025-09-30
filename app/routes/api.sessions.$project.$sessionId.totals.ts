@@ -107,22 +107,49 @@ export async function loader({ params }: Route.LoaderArgs) {
       let cacheCreationTokens = 0;
       let cacheReadTokens = 0;
       const allMessageCosts: number[] = [];
+      let currentCtx: { used: number; limit?: number; pct?: number } | undefined;
+      let foundPrimary = false;
+      // First pass: collect all assistant entries by message ID
+      const entriesByMessageId = new Map<string, any>();
       for (const line of allLines) {
         try {
           const v = JSON.parse(line);
-          try {
-            const cost = await calculateCostForEntry(v, "auto", fetcher);
-            if (typeof cost === "number" && Number.isFinite(cost)) {
-              totalUSD += cost;
-              if (cost > 0) allMessageCosts.push(cost);
+          // Only collect assistant entries with usage data
+          if (v?.type === "assistant" && v?.message?.usage) {
+            const messageId = v?.message?.id;
+            if (messageId) {
+              // Keep the latest occurrence (overwrite previous)
+              entriesByMessageId.set(messageId, v);
             }
-          } catch {}
-          const u = (v?.message?.usage ?? {}) as any;
-          if (typeof u.input_tokens === "number") inputTokens += u.input_tokens;
-          if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
-          if (typeof u.cache_creation_input_tokens === "number") cacheCreationTokens += u.cache_creation_input_tokens;
-          if (typeof u.cache_read_input_tokens === "number") cacheReadTokens += u.cache_read_input_tokens;
+          }
         } catch {}
+      }
+
+      // Second pass: calculate costs and aggregate tokens for unique entries
+      for (const v of entriesByMessageId.values()) {
+        try {
+          const cost = await calculateCostForEntry(v, "auto", fetcher);
+          if (typeof cost === "number" && Number.isFinite(cost)) {
+            totalUSD += cost;
+            if (cost > 0) allMessageCosts.push(cost);
+          }
+        } catch {}
+        const u = (v?.message?.usage ?? {}) as any;
+        if (typeof u.input_tokens === "number") inputTokens += u.input_tokens;
+        if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
+        if (typeof u.cache_creation_input_tokens === "number") cacheCreationTokens += u.cache_creation_input_tokens;
+        if (typeof u.cache_read_input_tokens === "number") cacheReadTokens += u.cache_read_input_tokens;
+        // Track latest assistant usage; prefer primary (not sidechain) if available
+        if (v?.message?.model && (u?.input_tokens || u?.cache_creation_input_tokens || u?.cache_read_input_tokens)) {
+          const isSide = Boolean(v?.isSidechain);
+          const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+          // If we haven't found a primary, update. If this is primary, mark and set.
+          if (!foundPrimary || !isSide) {
+            currentCtx = { used };
+            if (!isSide) foundPrimary = true;
+            (currentCtx as any).model = v.message.model;
+          }
+        }
       }
       totals = { totalUSD, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
       if (allMessageCosts.length > 0) {
@@ -140,11 +167,20 @@ export async function loader({ params }: Route.LoaderArgs) {
         const redMax = Math.max(p90 + 1e-9, max);
         messageCostScale = { greenMax: p50, yellowMax: p90, redMax };
       }
+      // Resolve context limit for the chosen currentCtx
+      if (currentCtx && (currentCtx as any).model) {
+        try {
+          const res = await fetcher.getModelContextLimit((currentCtx as any).model);
+          const limit = res && res.type === "Success" && typeof res.value === "number" ? res.value : undefined;
+          if (limit && limit > 0) currentCtx = { used: currentCtx.used, limit, pct: currentCtx.used / limit };
+        } catch { }
+      }
+      (globalThis as any)._ccvizCurrentCtx = currentCtx; // debug aid
     } catch {
       // continue without totals if ccusage not available
     }
 
-    return Response.json({ totalLines, categories, totals, messageCostScale });
+    return Response.json({ totalLines, categories, totals, messageCostScale, currentCtx: (globalThis as any)._ccvizCurrentCtx });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 500 });
   }

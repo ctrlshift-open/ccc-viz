@@ -161,17 +161,43 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       ]);
       const fetcher = new PricingFetcher(true);
 
-      // Attach per-entry cost to current page items
+      // Attach per-entry cost to current page items (only for assistant entries with usage)
+      // Build a map of latest entries by message ID from current page items
+      const pageEntriesByMessageId = new Map<string, any>();
+      for (const item of parsed) {
+        if (!item.ok) continue;
+        const v: any = item.value;
+        if (v?.type === "assistant" && v?.message?.usage) {
+          const messageId = v?.message?.id;
+          if (messageId) {
+            // Keep the latest occurrence in the current page
+            pageEntriesByMessageId.set(messageId, v);
+          }
+        }
+      }
+
+      // Calculate costs only for the latest occurrences
       await Promise.all(
-        parsed.map(async (item) => {
-          if (!item.ok) return;
-          const v: any = item.value;
+        Array.from(pageEntriesByMessageId.values()).map(async (v) => {
           try {
             const cost = await calculateCostForEntry(v, "auto", fetcher);
             if (typeof v === "object" && v) v.costUSD = cost;
           } catch { }
         })
       );
+
+      // Mark duplicate entries with zero cost for display
+      for (const item of parsed) {
+        if (!item.ok) continue;
+        const v: any = item.value;
+        if (v?.type === "assistant" && v?.message?.usage) {
+          const messageId = v?.message?.id;
+          if (messageId && pageEntriesByMessageId.get(messageId) !== v) {
+            // This is not the latest occurrence, mark with zero cost
+            if (typeof v === "object" && v) v.costUSD = 0;
+          }
+        }
+      }
 
       // Compute totals across the whole session file
       let totalUSD = 0;
@@ -182,34 +208,47 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       const allMessageCosts: number[] = [];
       let currentCtx: { used: number; limit?: number; pct?: number } | undefined;
       let foundPrimary = false;
-      // First pass: aggregate and remember last assistant with usage/model
+      // First pass: collect all assistant entries by message ID
+      const entriesByMessageId = new Map<string, any>();
       for (const line of allLines) {
         try {
           const v = JSON.parse(line);
-          try {
-            const cost = await calculateCostForEntry(v, "auto", fetcher);
-            if (typeof cost === "number" && Number.isFinite(cost)) {
-              totalUSD += cost;
-              if (cost > 0) allMessageCosts.push(cost);
-            }
-          } catch { }
-          const u = (v?.message?.usage ?? {}) as any;
-          if (typeof u.input_tokens === "number") inputTokens += u.input_tokens;
-          if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
-          if (typeof u.cache_creation_input_tokens === "number") cacheCreationTokens += u.cache_creation_input_tokens;
-          if (typeof u.cache_read_input_tokens === "number") cacheReadTokens += u.cache_read_input_tokens;
-          // Track latest assistant usage; prefer primary (not sidechain) if available
-          if (v?.type === "assistant" && v?.message?.model && (u?.input_tokens || u?.cache_creation_input_tokens || u?.cache_read_input_tokens)) {
-            const isSide = Boolean(v?.isSidechain);
-            const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-            // If we haven't found a primary, update. If this is primary, mark and set.
-            if (!foundPrimary || !isSide) {
-              currentCtx = { used };
-              if (!isSide) foundPrimary = true;
-              (currentCtx as any).model = v.message.model;
+          // Only collect assistant entries with usage data
+          if (v?.type === "assistant" && v?.message?.usage) {
+            const messageId = v?.message?.id;
+            if (messageId) {
+              // Keep the latest occurrence (overwrite previous)
+              entriesByMessageId.set(messageId, v);
             }
           }
         } catch { }
+      }
+
+      // Second pass: calculate costs and aggregate tokens for unique entries
+      for (const v of entriesByMessageId.values()) {
+        try {
+          const cost = await calculateCostForEntry(v, "auto", fetcher);
+          if (typeof cost === "number" && Number.isFinite(cost)) {
+            totalUSD += cost;
+            if (cost > 0) allMessageCosts.push(cost);
+          }
+        } catch { }
+        const u = (v?.message?.usage ?? {}) as any;
+        if (typeof u.input_tokens === "number") inputTokens += u.input_tokens;
+        if (typeof u.output_tokens === "number") outputTokens += u.output_tokens;
+        if (typeof u.cache_creation_input_tokens === "number") cacheCreationTokens += u.cache_creation_input_tokens;
+        if (typeof u.cache_read_input_tokens === "number") cacheReadTokens += u.cache_read_input_tokens;
+        // Track latest assistant usage; prefer primary (not sidechain) if available
+        if (v?.message?.model && (u?.input_tokens || u?.cache_creation_input_tokens || u?.cache_read_input_tokens)) {
+          const isSide = Boolean(v?.isSidechain);
+          const used = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+          // If we haven't found a primary, update. If this is primary, mark and set.
+          if (!foundPrimary || !isSide) {
+            currentCtx = { used };
+            if (!isSide) foundPrimary = true;
+            (currentCtx as any).model = v.message.model;
+          }
+        }
       }
       totals = { totalUSD, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
       // Build dynamic message cost scale using p50 and p90
@@ -1147,7 +1186,7 @@ function EntryCard({
             aria-expanded={expanded}
           >
             <span className="shrink-0"><Pill>summary</Pill></span>
-            <span className="text-sm text-gray-900 truncate">{v?.summary || "(no summary)"}</span>
+            <span className="text-sm text-gray-100 truncate">{v?.summary || "(no summary)"}</span>
           </button>
         ) : (
           header
