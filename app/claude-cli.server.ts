@@ -108,20 +108,6 @@ export async function sendPromptToSession(
         exitCode,
       });
     });
-
-    const timeout = setTimeout(() => {
-      child.kill();
-      resolve({
-        success: false,
-        output: stdout,
-        error: "Command timed out after 5 minutes",
-        exitCode: 124,
-      });
-    }, 5 * 60 * 1000);
-
-    child.on("close", () => {
-      clearTimeout(timeout);
-    });
   });
 }
 
@@ -199,19 +185,6 @@ export async function startNewSession(
           exitCode,
         });
       }
-    });
-
-    const timeout = setTimeout(() => {
-      child.kill();
-      resolve({
-        success: false,
-        error: "Command timed out after 2 minutes",
-        exitCode: 124,
-      });
-    }, 2 * 60 * 1000);
-
-    child.on("close", () => {
-      clearTimeout(timeout);
     });
   });
 }
