@@ -13,9 +13,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const thresholdMs = parseThreshold(url);
 
   try {
-    const [{ resolveSessionFile }, { getExistingTailer }] = await Promise.all([
+    const [{ resolveSessionFile }, { getExistingTailer }, { isProcessActive }] = await Promise.all([
       import("~/utils/path-safety.server"),
       import("~/utils/file-tail.server"),
+      import("~/claude-cli.server"),
     ]);
     const { file } = resolveSessionFile(project, sessionId);
     const fs = await import("node:fs/promises");
@@ -26,11 +27,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const lastAppendAt = tailer?.getLastAppendAt() ?? null;
     const subs = tailer?.getSubscriberCount() ?? 0;
 
+    // Check if process is actively running
+    const hasActiveProcess = isProcessActive(sessionId);
+
     // Quick heuristic: recent writes imply active
     const now = Date.now();
     const recentMs = Math.max(mtimeMs || 0, lastAppendAt || 0);
-    let active = recentMs > 0 && (now - recentMs) <= thresholdMs;
-    let reason = active ? "recent-write" : "stale";
+    let active = hasActiveProcess || (recentMs > 0 && (now - recentMs) <= thresholdMs);
+    let reason = hasActiveProcess ? "process-running" : (active ? "recent-write" : "stale");
 
     // Refine by tail-of-file signal (look for explicit summary end)
     let lastEventType: string | null = null;
@@ -88,6 +92,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     return Response.json({
       active,
       reason,
+      hasActiveProcess,
       mtimeMs,
       lastAppendAt,
       thresholdMs,

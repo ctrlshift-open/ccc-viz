@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useFetcher, useLoaderData, useLocation, useNavigate } from "react-router";
 import { MessageTypeIcon, getMessageTypeIcon } from "~/components/MessageTypeIcon";
+import { CancelButton } from "~/components/CancelButton";
 import type { Route } from "./+types/$project.sessions.$sessionId";
 import { formatUSD, costColorHex } from "~/utils/format";
 
@@ -930,6 +931,15 @@ export default function SessionDetails() {
           </div>
         </div>
       ) : null}
+
+      <CancelButton
+        project={data.project}
+        sessionId={data.sessionId}
+        onCancelled={() => {
+          // Optionally refresh data or clear pending prompts when cancelled
+          console.log("[CancelButton] Process cancelled");
+        }}
+      />
 
       <PromptForm
         onPromptSubmit={(text) => {

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 export type CLIResult = {
@@ -20,6 +20,42 @@ export type SendPromptOptions = {
   printMode?: boolean;
   workingDirectory?: string;
 };
+
+// Process registry to track active Claude CLI processes
+const activeProcesses = new Map<string, {
+  process: ChildProcess;
+  startTime: number;
+  command: string;
+}>();
+
+export function getActiveProcess(sessionId: string): ChildProcess | undefined {
+  return activeProcesses.get(sessionId)?.process;
+}
+
+export function isProcessActive(sessionId: string): boolean {
+  const entry = activeProcesses.get(sessionId);
+  return entry !== undefined && !entry.process.killed;
+}
+
+export function cancelProcess(sessionId: string): boolean {
+  const entry = activeProcesses.get(sessionId);
+  if (!entry || entry.process.killed) {
+    return false;
+  }
+
+  console.log(`[cancelProcess] Sending SIGINT to session ${sessionId}`);
+  entry.process.kill('SIGINT');
+
+  // Safety: SIGKILL after 10s if still running
+  setTimeout(() => {
+    if (!entry.process.killed) {
+      console.warn(`[cancelProcess] SIGINT failed for ${sessionId}, sending SIGKILL`);
+      entry.process.kill('SIGKILL');
+    }
+  }, 10000);
+
+  return true;
+}
 
 function validateSessionId(sessionId: string): boolean {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,6 +109,13 @@ export async function sendPromptToSession(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    // Register process in active registry
+    activeProcesses.set(sessionId, {
+      process: child,
+      startTime: Date.now(),
+      command: prompt.slice(0, 100)
+    });
+
     let stdout = "";
     let stderr = "";
 
@@ -86,6 +129,7 @@ export async function sendPromptToSession(
 
     child.on("error", (error) => {
       console.error("[claude-cli] Process error:", error.message);
+      activeProcesses.delete(sessionId);
       resolve({
         success: false,
         output: stdout,
@@ -100,6 +144,8 @@ export async function sendPromptToSession(
 
       console.log("[claude-cli] Process closed with code:", exitCode);
       if (stderr) console.error("[claude-cli] stderr:", stderr);
+
+      activeProcesses.delete(sessionId);
 
       resolve({
         success,
@@ -145,6 +191,13 @@ export async function startNewSession(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    // Register process in active registry
+    activeProcesses.set(sessionId, {
+      process: child,
+      startTime: Date.now(),
+      command: prompt.slice(0, 100)
+    });
+
     let stdout = "";
     let stderr = "";
 
@@ -158,6 +211,7 @@ export async function startNewSession(
 
     child.on("error", (error) => {
       console.error("[startNewSession] Process error:", error.message);
+      activeProcesses.delete(sessionId);
       resolve({
         success: false,
         error: `Failed to execute CLI: ${error.message}`,
@@ -171,6 +225,8 @@ export async function startNewSession(
 
       console.log("[startNewSession] Process closed with code:", exitCode);
       if (stderr) console.error("[startNewSession] stderr:", stderr);
+
+      activeProcesses.delete(sessionId);
 
       if (success) {
         resolve({
