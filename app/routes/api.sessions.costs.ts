@@ -42,17 +42,31 @@ export async function loader({ request }: Route.LoaderArgs) {
       try {
         const content = await readFile(filePath, "utf8");
         const lines = content.split(/\r?\n/).filter(Boolean);
+        // First pass: collect all assistant entries by message ID
+        const entriesByMessageId = new Map<string, any>();
         for (const line of lines) {
           try {
             const v = JSON.parse(line);
-            // Use ccusage's calculation for consistency with detail view
-            const cost = await calculateCostForEntry(v, "auto", fetcher);
-            if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
-            // Track last seen model for potential heuristics (not currently needed)
-            if (typeof v?.message?.model === "string") lastModel = v.message.model;
+            // Only collect assistant entries with usage data
+            if (v?.type === "assistant" && v?.message?.usage) {
+              const messageId = v?.message?.id;
+              if (messageId) {
+                // Keep the latest occurrence (overwrite previous)
+                entriesByMessageId.set(messageId, v);
+              }
+            }
           } catch {
             // ignore invalid lines
           }
+        }
+
+        // Second pass: calculate costs for unique entries
+        for (const v of entriesByMessageId.values()) {
+          // Use ccusage's calculation for consistency with detail view
+          const cost = await calculateCostForEntry(v, "auto", fetcher);
+          if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
+          // Track last seen model for potential heuristics (not currently needed)
+          if (typeof v?.message?.model === "string") lastModel = v.message.model;
         }
       } catch {
         // ignore file read errors per session
