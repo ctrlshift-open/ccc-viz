@@ -761,7 +761,7 @@ export default function SessionDetails() {
   }, [totalsFetcher.state, totalsFetcher.data]);
 
   return (
-    <main className="p-4 max-w-screen-md mx-auto overflow-x-hidden">
+    <main className="p-4 pt-16 md:pt-4 max-w-screen-md mx-auto overflow-x-hidden">
       <h1 className="text-xl font-semibold mb-2">
         {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)} - Session Details
       </h1>
@@ -1644,6 +1644,7 @@ function EntryCard({
 function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void }) {
   const fetcher = useFetcher<typeof action>();
   const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState("sonnet");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isSubmitting = fetcher.state === "submitting";
@@ -1660,7 +1661,7 @@ function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void
     if (!prompt.trim() || isSubmitting) return;
     const promptText = prompt;
     onPromptSubmit(promptText);
-    fetcher.submit({ prompt: promptText }, { method: "post" });
+    fetcher.submit({ prompt: promptText, model }, { method: "post" });
 
     // Fallback: clear this specific prompt after 10 seconds if it's still pending
     setTimeout(() => {
@@ -1679,6 +1680,26 @@ function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void
     <div className="rounded border border-blue-800 bg-blue-950/30 p-4 mb-4">
       <h2 className="text-sm font-semibold text-gray-200 mb-3">Send Prompt to Claude</h2>
       <form onSubmit={handleSubmit}>
+        <div className="mb-3">
+          <label htmlFor="model-select" className="block text-xs text-gray-400 mb-2">
+            Model
+          </label>
+          <select
+            id="model-select"
+            name="model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={isSubmitting}
+            className="w-full p-2 rounded border border-gray-600 bg-gray-900 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <option value="sonnet">Sonnet 4.5 (default - daily use)</option>
+            <option value="opus">💎 Opus 4.1 (most powerful)</option>
+            <option value="haiku">⚡ Haiku (fastest)</option>
+            <option value="sonnet[1m]">Sonnet 4.5 [1M context]</option>
+            <option value="opusplan">Opus Plan Mode (hybrid)</option>
+            <option value="default">Default (auto-select)</option>
+          </select>
+        </div>
         <textarea
           ref={textareaRef}
           name="prompt"
