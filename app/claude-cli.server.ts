@@ -104,8 +104,8 @@ export async function sendPromptToSession(
   return new Promise((resolve) => {
     const child = spawn("claude", args, {
       cwd: options.workingDirectory,
-      env: process.env,
-      shell: false,
+      env: { ...process.env, HOME: process.env.HOME },
+      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -186,8 +186,8 @@ export async function startNewSession(
   return new Promise((resolve) => {
     const child = spawn("claude", args, {
       cwd: workingDirectory,
-      env: process.env,
-      shell: false,
+      env: { ...process.env, HOME: process.env.HOME },
+      shell: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
