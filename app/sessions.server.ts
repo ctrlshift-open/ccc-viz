@@ -5,7 +5,7 @@ import { resolveSessionFile } from "~/utils/path-safety.server";
 
 export type SessionPreview = {
   id: string;
-  firstMessage: string;
+  lastMessage: string;
   totalMessages: number;
   gitBranch?: string;
   timestamp: string;
@@ -17,16 +17,16 @@ export async function getSessionPreview(project: string, sessionId: string): Pro
   try {
     const content = await readFile(file, "utf8");
     const lines = content.split(/\r?\n/).filter((l) => l.length > 0);
-    
-    let firstMessage = "";
+
+    let lastMessage = "";
     let gitBranch: string | undefined;
     let timestamp = "";
-    
-    // Find first assistant message and git branch info
+
+    // Find git branch info from the beginning
     for (let i = 0; i < Math.min(lines.length, 30); i++) {
       try {
         const parsed = JSON.parse(lines[i]);
-        
+
         // Look for git branch - can be in environment_details or directly in the entry
         if (parsed.gitBranch) {
           gitBranch = parsed.gitBranch;
@@ -36,47 +36,57 @@ export async function getSessionPreview(project: string, sessionId: string): Pro
             gitBranch = gitMatch[1].trim();
           }
         }
-        
-        // Find first assistant message
-        if (!firstMessage && parsed.type === "assistant" && parsed.message) {
+
+        // Get timestamp from first entry
+        if (!timestamp && parsed.timestamp) {
+          timestamp = parsed.timestamp;
+        }
+
+        if (gitBranch && timestamp) break;
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+
+    // Find last assistant message by scanning backwards from the end
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 50); i--) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+
+        // Find last assistant message
+        if (parsed.type === "assistant" && parsed.message) {
           const message = parsed.message;
           const content = message.content;
-          
+
           if (Array.isArray(content)) {
             // Look for text content in the array
             const textContent = content.find(c => c.type === "text");
             if (textContent && textContent.text) {
               // Clean up the text and truncate
-              firstMessage = textContent.text
+              lastMessage = textContent.text
                 .replace(/\n+/g, ' ') // Replace newlines with spaces
                 .replace(/\s+/g, ' ') // Normalize whitespace
                 .trim()
                 .slice(0, 200); // Truncate to 200 chars
+              break;
             }
           } else if (typeof content === "string") {
-            firstMessage = content
+            lastMessage = content
               .replace(/\n+/g, ' ')
               .replace(/\s+/g, ' ')
               .trim()
               .slice(0, 200);
+            break;
           }
         }
-        
-        // Get timestamp from first entry
-        if (!timestamp && parsed.timestamp) {
-          timestamp = parsed.timestamp;
-        }
-        
-        // Stop if we found everything
-        if (firstMessage && gitBranch && timestamp) break;
       } catch {
         // Skip invalid JSON lines
       }
     }
-    
-    // If no meaningful first message found, try to find first human message as fallback
-    if (!firstMessage) {
-      for (let i = 0; i < Math.min(lines.length, 20); i++) {
+
+    // If no meaningful last message found, try to find last human message as fallback
+    if (!lastMessage) {
+      for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
         try {
           const parsed = JSON.parse(lines[i]);
           if (parsed.type === "user" && parsed.message) {
@@ -86,12 +96,12 @@ export async function getSessionPreview(project: string, sessionId: string): Pro
               if (textContent) {
                 const text = typeof textContent === "string" ? textContent : textContent.text;
                 if (!text.startsWith("/")) {
-                  firstMessage = "User: " + text.slice(0, 150);
+                  lastMessage = "User: " + text.slice(0, 150);
                   break;
                 }
               }
             } else if (typeof content === "string" && !content.startsWith("/")) {
-              firstMessage = "User: " + content.slice(0, 150);
+              lastMessage = "User: " + content.slice(0, 150);
               break;
             }
           }
@@ -100,15 +110,15 @@ export async function getSessionPreview(project: string, sessionId: string): Pro
         }
       }
     }
-    
+
     // Final fallback
-    if (!firstMessage) {
-      firstMessage = "Session started";
+    if (!lastMessage) {
+      lastMessage = "Session in progress";
     }
-    
+
     return {
       id: sessionId,
-      firstMessage,
+      lastMessage,
       totalMessages: lines.length,
       gitBranch,
       timestamp

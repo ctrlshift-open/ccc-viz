@@ -8,7 +8,7 @@ import { formatUSD, costColorHex } from "~/utils/format";
 type Session = { id: string; filename: string; modified: string };
 type SessionPreview = {
   id: string;
-  firstMessage: string;
+  lastMessage: string;
   totalMessages: number;
   gitBranch?: string;
   timestamp: string;
@@ -105,7 +105,7 @@ export default function ProjectSessions() {
     const toFetch: string[] = [];
 
     data.sessions.forEach(session => {
-      const cacheKey = `session-preview-v2:${data.project}:${session.id}`;
+      const cacheKey = `session-preview-v3:${data.project}:${session.id}`;
       const cachedData = localStorage.getItem(cacheKey);
 
       if (cachedData) {
@@ -139,7 +139,7 @@ export default function ProjectSessions() {
           // Cache the fetched previews
           Object.entries(fetchedPreviews).forEach(([id, preview]) => {
             if (preview) {
-              const cacheKey = `session-preview-v2:${data.project}:${id}`;
+              const cacheKey = `session-preview-v3:${data.project}:${id}`;
               localStorage.setItem(cacheKey, JSON.stringify({
                 preview,
                 cachedAt: Date.now()
@@ -292,7 +292,7 @@ export default function ProjectSessions() {
                   <div>
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="font-medium text-gray-100 line-clamp-2">
-                        {preview.firstMessage}
+                        {preview.lastMessage}
                       </div>
                       {stopped ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700 text-gray-200 border border-gray-500 shrink-0">Stopped</span>
