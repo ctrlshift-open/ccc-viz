@@ -1,5 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
+
+// Get the full path to claude command at module load time
+const CLAUDE_PATH = (() => {
+  try {
+    return execSync("which claude", { encoding: "utf8" }).trim();
+  } catch {
+    return "claude"; // fallback to PATH lookup
+  }
+})();
 
 export type CLIResult = {
   success: boolean;
@@ -99,13 +109,13 @@ export async function sendPromptToSession(
 
   args.push(prompt);
 
-  console.log("[claude-cli] Executing:", "claude", args.slice(0, -1).join(" "), `"${prompt.slice(0, 50)}..."`);
+  console.log("[claude-cli] Executing:", CLAUDE_PATH, args.slice(0, -1).join(" "), `"${prompt.slice(0, 50)}..."`);
 
   return new Promise((resolve) => {
-    const child = spawn("claude", args, {
+    const child = spawn(CLAUDE_PATH, args, {
       cwd: options.workingDirectory,
       env: { ...process.env, HOME: process.env.HOME },
-      shell: true,
+      shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -184,10 +194,10 @@ export async function startNewSession(
   console.log("[startNewSession] Prompt:", prompt.slice(0, 100));
 
   return new Promise((resolve) => {
-    const child = spawn("claude", args, {
+    const child = spawn(CLAUDE_PATH, args, {
       cwd: workingDirectory,
       env: { ...process.env, HOME: process.env.HOME },
-      shell: true,
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
 

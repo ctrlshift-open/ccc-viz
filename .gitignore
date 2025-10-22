@@ -19,3 +19,4 @@ tmux-urls.cfg
 cc-viz-*.tgz
 
 test-results/.last-run.json
+.playwright-mcp

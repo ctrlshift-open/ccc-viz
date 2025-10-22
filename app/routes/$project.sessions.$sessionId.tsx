@@ -919,6 +919,37 @@ export default function SessionDetails() {
             <Link to={setAllCategoriesUrl(false)} className="text-xs sm:text-sm text-blue-400 hover:underline">
               Collapse all
             </Link>
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                // Find the most recent non-tool message
+                const nonToolItems = items.filter((it) => {
+                  if (!it.ok) return false;
+                  const v = it.value as any;
+                  const content = v?.message?.content;
+                  const segs: any[] = Array.isArray(content) ? content : content ? [content] : [];
+                  // Exclude tool_use and tool_result
+                  const hasToolUse = segs.find((s) => s && s.type === "tool_use");
+                  const hasToolResult = segs.find((s) => s && s.type === "tool_result");
+                  return !hasToolUse && !hasToolResult;
+                });
+
+                if (nonToolItems.length > 0) {
+                  const mostRecent = nonToolItems[0]; // First item in desc order
+                  const uuid = (mostRecent.value as any)?.uuid || (mostRecent.value as any)?.message?.id || (mostRecent.value as any)?.leafUuid;
+                  if (uuid) {
+                    const next = new Set([uuid]);
+                    setManualOpenUuids(next);
+                    persistManualOpen(next);
+                  }
+                }
+              }}
+              className="text-xs sm:text-sm text-blue-400 hover:underline"
+              title="Expand only the most recent non-tool message"
+            >
+              Latest only
+            </a>
             <span className="text-gray-600">|</span>
             <button
               type="button"

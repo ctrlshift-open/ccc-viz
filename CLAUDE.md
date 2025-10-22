@@ -50,6 +50,13 @@ Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:
 
 ## Development Guidelines
 
+### Hot Module Replacement (HMR)
+
+React Router 7 with Vite provides HMR for both client and server code:
+- **No restart needed** for changes to routes, components, loaders, actions, or `.server.ts` files
+- Vite's HMR handles server-side code in dev mode automatically
+- Only restart if you encounter module resolution issues or environment variable changes
+
 ### React Router 7 SSR Module Boundaries (CRITICAL)
 
 **NEVER import Node.js modules at the top level of route files.** This causes "Module has been externalized for browser compatibility" errors during client-side navigation.

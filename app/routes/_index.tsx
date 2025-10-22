@@ -183,7 +183,7 @@ export default function Home() {
   }, [data.projects]);
 
   return (
-    <main className="p-4 max-w-screen-md mx-auto">
+    <main className="p-4 pt-16 md:pt-4 max-w-screen-md mx-auto">
       <h1 className="text-xl font-semibold mb-2">Projects</h1>
       <p className="text-sm text-gray-500 mb-4 break-all">
         Source: {data.dir}
