@@ -42,6 +42,7 @@
     "ccusage": "^16.2.3",
     "isbot": "^5.1.27",
     "lucide-react": "^0.542.0",
+    "nanoid": "^5.1.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "9.0.3",

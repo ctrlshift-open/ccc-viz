@@ -1,11 +1,11 @@
 ---
 # ccc-viz-o1b7
 title: 'Phase 01: Foundation'
-status: in-progress
+status: completed
 type: task
 priority: normal
 created_at: 2026-01-25T17:11:55Z
-updated_at: 2026-01-25T18:46:12Z
+updated_at: 2026-01-25T18:56:44Z
 ---
 
 **Depends on:** None
@@ -13,7 +13,7 @@ updated_at: 2026-01-25T18:46:12Z
 ## Tasks
 
 - [x] Create `app/types/kanban.ts` with types
-- [ ] Create `app/utils/kanban.server.ts`:
+- [x] Create `app/utils/kanban.server.ts`:
   - `getKanbanState()` - read from `~/.claude/cc-viz/kanban.json`
   - `saveKanbanState()` - write state
   - `syncSessionsToCards()` - detect new sessions:
@@ -23,5 +23,5 @@ updated_at: 2026-01-25T18:46:12Z
 
 ## Verification
 
-- [ ] Tests pass: `pnpm test`
-- [ ] No type errors: `pnpm typecheck`
+- [x] Tests pass: `pnpm test`
+- [x] No type errors: `pnpm typecheck`
