@@ -109,6 +109,31 @@ export function MobileNav() {
                 </div>
               </Link>
             </li>
+            <li>
+              <Link
+                to="/kanban"
+                className={`block px-3 py-2 rounded-lg transition-colors ${
+                  location.pathname === "/kanban"
+                    ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
+                    : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+                  </svg>
+                  <span>Kanban</span>
+                </div>
+              </Link>
+            </li>
 
             {/* Current project section if we're in a project */}
             {location.pathname.includes("/sessions") && (

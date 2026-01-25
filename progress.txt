@@ -12,6 +12,17 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-9qf3 (Phase 06 - Navigation)
+
+- Added kanban link to MobileNav component
+- Files changed: `app/components/MobileNav.tsx`
+- **Learnings:**
+  - MobileNav uses Link from react-router with active state styling based on location.pathname
+  - SVG icon for kanban: 3 columns pattern (M9 17V7... path creates the visual)
+  - Added after Projects link as top-level nav item
+
+---
+
 ## 2026-01-25 - ccc-viz-6bca (Phase 05 - Merging)
 
 - Implemented card merge UX: drag card onto another shows confirmation modal
