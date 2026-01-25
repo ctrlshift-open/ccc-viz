@@ -13,15 +13,27 @@ type Props = {
   projects: string[];
   onCardMove?: (cardId: string, newStatus: KanbanStatus) => void;
   onTitleChange?: (cardId: string, newTitle: string) => void;
+  onTitleRegenerate?: (cardId: string) => Promise<void>;
   onMerge?: (sourceId: string, targetId: string) => void;
 };
 
-export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onMerge }: Props) {
+export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitleRegenerate, onMerge }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [draggedCard, setDraggedCard] = useState<KanbanCard | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanStatus | null>(null);
   const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
+  const [regeneratingCardId, setRegeneratingCardId] = useState<string | null>(null);
+
+  const handleTitleRegenerate = async (cardId: string) => {
+    if (!onTitleRegenerate) return;
+    setRegeneratingCardId(cardId);
+    try {
+      await onTitleRegenerate(cardId);
+    } finally {
+      setRegeneratingCardId(null);
+    }
+  };
 
   // Filter cards by search and project
   const filteredCards = useMemo(() => {
@@ -154,6 +166,7 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onMerg
             status={status}
             cards={cardsByStatus[status]}
             onTitleChange={onTitleChange}
+            onTitleRegenerate={handleTitleRegenerate}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             onDragOver={() => handleDragOver(status)}
@@ -161,6 +174,7 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onMerg
             isDragOver={dragOverColumn === status && draggedCard?.status !== status}
             onCardDrop={handleCardDrop}
             dragTargetId={draggedCard ? undefined : undefined}
+            regeneratingCardId={regeneratingCardId}
           />
         ))}
       </div>

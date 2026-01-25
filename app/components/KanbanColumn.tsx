@@ -6,6 +6,7 @@ type Props = {
   status: KanbanStatus;
   cards: KanbanCardType[];
   onTitleChange?: (id: string, newTitle: string) => void;
+  onTitleRegenerate?: (id: string) => void;
   onDragStart?: (e: React.DragEvent, card: KanbanCardType) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -13,12 +14,14 @@ type Props = {
   isDragOver?: boolean;
   onCardDrop?: (targetCard: KanbanCardType) => void;
   dragTargetId?: string | null;
+  regeneratingCardId?: string | null;
 };
 
 export function KanbanColumn({
   status,
   cards,
   onTitleChange,
+  onTitleRegenerate,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -26,6 +29,7 @@ export function KanbanColumn({
   isDragOver,
   onCardDrop,
   dragTargetId,
+  regeneratingCardId,
 }: Props) {
   const sortedCards = [...cards].sort((a, b) => a.order - b.order);
 
@@ -60,10 +64,12 @@ export function KanbanColumn({
             key={card.id}
             card={card}
             onTitleChange={onTitleChange}
+            onTitleRegenerate={onTitleRegenerate}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onCardDrop={onCardDrop}
             isDragTarget={dragTargetId === card.id}
+            isRegenerating={regeneratingCardId === card.id}
           />
         ))}
         {cards.length === 0 && (

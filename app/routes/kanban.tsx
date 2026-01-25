@@ -1,7 +1,8 @@
 import type { Route } from "./+types/kanban";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator } from "react-router";
 import { KanbanBoard } from "~/components/KanbanBoard";
 import type { KanbanStatus } from "~/types/kanban";
+import { useCallback } from "react";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -93,6 +94,7 @@ export async function action({ request }: Route.ActionArgs) {
 export default function Kanban() {
   const { state, projects } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  const revalidator = useRevalidator();
 
   const handleCardMove = (cardId: string, newStatus: KanbanStatus) => {
     fetcher.submit(
@@ -107,6 +109,15 @@ export default function Kanban() {
       { method: "post" }
     );
   };
+
+  const handleTitleRegenerate = useCallback(async (cardId: string) => {
+    const response = await fetch(`/api/kanban/cards/${cardId}`, {
+      method: "POST",
+    });
+    if (response.ok) {
+      revalidator.revalidate();
+    }
+  }, [revalidator]);
 
   const handleMerge = (sourceId: string, targetId: string) => {
     fetcher.submit(
@@ -124,6 +135,7 @@ export default function Kanban() {
           projects={projects}
           onCardMove={handleCardMove}
           onTitleChange={handleTitleChange}
+          onTitleRegenerate={handleTitleRegenerate}
           onMerge={handleMerge}
         />
       </div>
