@@ -12,8 +12,8 @@ Enhance kanban cards with AI-generated titles using Claude CLI with haiku model.
 |-------|------|--------|---------|
 | 01 | Core AI Title Generation | completed | ccc-viz-l7gt |
 | 02 | Apply During Card Creation | completed | ccc-viz-w2eu |
-| 03 | Single Card Regeneration | todo | ccc-viz-fzve |
-| 04 | CLI Migration Script | todo | ccc-viz-tajp |
+| 03 | Single Card Regeneration | completed | ccc-viz-fzve |
+| 04 | CLI Migration Script | completed | ccc-viz-tajp |
 
 Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title status } }'`
 

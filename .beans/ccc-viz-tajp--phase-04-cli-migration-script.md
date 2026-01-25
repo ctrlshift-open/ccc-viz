@@ -1,11 +1,11 @@
 ---
 # ccc-viz-tajp
 title: 'Phase 04: CLI Migration Script'
-status: in-progress
+status: completed
 type: task
 priority: normal
 created_at: 2026-01-25T20:24:37Z
-updated_at: 2026-01-25T20:43:45Z
+updated_at: 2026-01-25T20:48:38Z
 ---
 
 **Depends on:** Phase 01
@@ -20,5 +20,5 @@ updated_at: 2026-01-25T20:43:45Z
 
 ## Verification
 
-- [ ] Run `pnpm migrate:titles` - all cards get updated titles
-- [ ] Check `~/.claude/cc-viz/kanban.json` for version field
+- [x] Run `pnpm migrate:titles` - all cards get updated titles
+- [x] Check `~/.claude/cc-viz/kanban.json` for version field

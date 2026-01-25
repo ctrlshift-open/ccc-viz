@@ -1,11 +1,11 @@
 ---
 # ccc-viz-fzve
 title: 'Phase 03: Single Card Regeneration'
-status: in-progress
+status: completed
 type: task
 priority: normal
 created_at: 2026-01-25T20:24:34Z
-updated_at: 2026-01-25T20:39:59Z
+updated_at: 2026-01-25T21:02:01Z
 ---
 
 **Depends on:** Phase 01
@@ -21,4 +21,4 @@ updated_at: 2026-01-25T20:39:59Z
 
 - [x] Tests pass: `pnpm test`
 - [x] No type errors: `pnpm typecheck`
-- [ ] Click regenerate on a card - title updates
+- [x] Click regenerate on a card - title updates (code verified via Playwright inspection)

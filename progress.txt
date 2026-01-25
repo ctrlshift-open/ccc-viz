@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-tajp (verification)
+
+- Verified Phase 04 CLI migration script and Phase 03 single card regeneration
+- All verification tasks complete for both phases
+- **Learnings:**
+  - `pnpm migrate:titles` successfully processes cards, sets version=1 on AI-titled cards
+  - kanban.json stores version field at card level to track AI-generated titles
+  - syncSessionsToCards() with AI enabled causes slow page loads when many new sessions exist (expected behavior)
+
+---
+
 ## 2026-01-25 - ccc-viz-tajp
 
 - Created CLI migration script for bulk AI title generation
