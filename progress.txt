@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-fzve
+
+- Added single card title regeneration with AI
+- Files changed:
+  - app/routes/api.kanban.cards.$cardId.ts - added POST handler for regeneration
+  - app/components/KanbanCard.tsx - added sparkle button with loading spinner
+  - app/components/KanbanColumn.tsx - pass through regenerate props
+  - app/components/KanbanBoard.tsx - manage regeneratingCardId state, async handler
+  - app/routes/kanban.tsx - handleTitleRegenerate calls POST API, revalidates
+- **Learnings:**
+  - Use fetch() directly for async POST calls, then revalidate with useRevalidator
+  - isRegenerating prop passed down to show spinner on specific card
+  - Star icon (sparkle) used for regenerate button - appears next to editable title
+
+---
+
 ## 2026-01-25 - ccc-viz-w2eu
 
 - Enabled AI title generation during card creation sync
