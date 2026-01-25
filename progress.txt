@@ -4,6 +4,21 @@
 - Test framework: vitest
 - React Router 7 with SSR - dynamic imports required for Node.js modules in loaders
 
+- API routes use dynamic imports for server modules: `await import("~/utils/kanban.server")`
+
+---
+
+## 2026-01-25 - ccc-viz-znao (Phase 02 - API Routes)
+
+- Created 3 kanban API routes
+- Files changed: `app/routes/api.kanban.state.ts`, `api.kanban.cards.$cardId.ts`, `api.kanban.merge.ts`
+- **Learnings:**
+  - `api.kanban.state.ts` - GET syncs sessions then returns state, POST updates cards array
+  - `api.kanban.cards.$cardId.ts` - PATCH updates card status/order/title
+  - `api.kanban.merge.ts` - POST merges source into target card
+  - All routes use dynamic imports for server modules to avoid SSR bundling issues
+  - Routes return Response.json() per existing patterns
+
 ---
 
 ## 2026-01-25 - ccc-viz-o1b7 (Phase 01)
