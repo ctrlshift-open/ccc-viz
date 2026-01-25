@@ -3,97 +3,22 @@
 - Package manager: pnpm
 - Test framework: vitest
 - React Router 7 with SSR - dynamic imports required for Node.js modules in loaders
-
-- API routes use dynamic imports for server modules: `await import("~/utils/kanban.server")`
-
-- Main route pattern: loader fetches data + syncs state, action handles mutations via fetcher
-
-- Card-on-card drop for merge: use onDragOver/onDrop with stopPropagation to prevent column drop
+- kanban.server.ts is the main server util for kanban state management
+- Session parsing uses resolveSessionFile() from path-safety.server.ts
 
 ---
 
-## 2026-01-25 - ccc-viz-9qf3 (Phase 06 - Navigation)
+## 2026-01-25 - ccc-viz-l7gt
 
-- Added kanban link to MobileNav component
-- Files changed: `app/components/MobileNav.tsx`
+- Implemented core AI title generation for kanban cards
+- Files changed:
+  - app/types/kanban.ts - added `version` field to KanbanCard
+  - app/utils/kanban.server.ts - added extractSessionContent(), generateAITitle(), updated generateTitle()
 - **Learnings:**
-  - MobileNav uses Link from react-router with active state styling based on location.pathname
-  - SVG icon for kanban: 3 columns pattern (M9 17V7... path creates the visual)
-  - Added after Projects link as top-level nav item
-
----
-
-## 2026-01-25 - ccc-viz-6bca (Phase 05 - Merging)
-
-- Implemented card merge UX: drag card onto another shows confirmation modal
-- Files changed: `KanbanCard.tsx`, `KanbanColumn.tsx`, `KanbanBoard.tsx`, `kanban.tsx`
-- **Learnings:**
-  - Added onCardDrop/isDragTarget props to KanbanCard for card-on-card drops
-  - e.stopPropagation() in card's drop handler prevents column from also firing
-  - Merge confirmation modal stored as state with sourceCard/targetCard
-  - Uses existing mergeCards() from kanban.server.ts via new "merge" intent in action
-
----
-
-## 2026-01-25 - ccc-viz-3m6p (Phase 04 - Main Route)
-
-- Created `app/routes/kanban.tsx` - main route for kanban board
-- Files changed: `app/routes/kanban.tsx`, `CLAUDE.md`
-- **Learnings:**
-  - Loader: calls `syncSessionsToCards()` then `getProjects()` for dropdown
-  - Action: uses `intent` form field to switch between move/updateTitle handlers
-  - useFetcher for optimistic-feeling updates without full page reload
-  - KanbanBoard component receives projects as string[] for filter dropdown
-
----
-
-## 2026-01-25 - ccc-viz-0qde (Phase 03 - UI Components)
-
-- Created 3 kanban UI components: KanbanCard, KanbanColumn, KanbanBoard
-- Files changed: `app/components/KanbanCard.tsx`, `KanbanColumn.tsx`, `KanbanBoard.tsx`
-- **Learnings:**
-  - KanbanCard: click-to-edit title via useState, HTML5 drag with dataTransfer
-  - KanbanColumn: receives isDragOver prop for visual feedback on drop zone
-  - KanbanBoard: useMemo for filtering/grouping cards, search + project dropdown
-  - Components follow existing patterns from MobileNav for styling consistency
-
----
-
-## 2026-01-25 - ccc-viz-znao (Phase 02 - API Routes)
-
-- Created 3 kanban API routes
-- Files changed: `app/routes/api.kanban.state.ts`, `api.kanban.cards.$cardId.ts`, `api.kanban.merge.ts`
-- **Learnings:**
-  - `api.kanban.state.ts` - GET syncs sessions then returns state, POST updates cards array
-  - `api.kanban.cards.$cardId.ts` - PATCH updates card status/order/title
-  - `api.kanban.merge.ts` - POST merges source into target card
-  - All routes use dynamic imports for server modules to avoid SSR bundling issues
-  - Routes return Response.json() per existing patterns
-
----
-
-## 2026-01-25 - ccc-viz-o1b7 (Phase 01)
-
-- Created `app/types/kanban.ts` with kanban board types
-- Files changed: `app/types/kanban.ts`
-- **Learnings:**
-  - Types include: KanbanStatus, KanbanCard, KanbanState, CreateCardInput, UpdateCardInput, MergeCardsInput
-  - Column order: archive, back-log, in-progress, discard, complete
-  - Cards track sessionIds array for merge support
-
----
-
-## 2026-01-25 - ccc-viz-o1b7 (Phase 01 - Server Utils)
-
-- Created `app/utils/kanban.server.ts` with server-side state management
-- Files changed: `app/utils/kanban.server.ts`, `package.json` (added nanoid)
-- **Learnings:**
-  - State stored at `~/.claude/cc-viz/kanban.json`
-  - Uses nanoid for generating card IDs
-  - `syncSessionsToCards()` handles initial import (→ archive) vs subsequent imports (→ in-progress)
-  - `generateTitle()` extracts title from git branch or last message
-  - Reuses `getSessionPreview()` and `getProjects()` from existing server utils
-  - Standard Node.js imports (fs, path, os) ok at top-level for .server.ts files
+  - Claude CLI invoked via: `claude --model haiku --print "<prompt>" < file`
+  - generateTitle() returns {title, version?} - version=1 for AI-generated
+  - AI disabled during sync to avoid rate limits; use migrate script or regenerate button
+  - Session content extraction pulls first/last user + assistant messages (500 char limit each)
 
 ---
 
