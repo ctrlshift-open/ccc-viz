@@ -42,6 +42,7 @@ Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:
 - `_index.tsx` - Home page listing Claude projects
 - `$project.sessions._index.tsx` - Project sessions list
 - `$project.sessions.$sessionId.tsx` - Session detail view with filtering
+- `kanban.tsx` - Kanban board for organizing sessions across projects
 
 ### Data Flow
 1. Application reads Claude Code sessions from local filesystem (`~/.claude/projects`)
@@ -139,7 +140,7 @@ Sessions contain messages with various types documented in `docs/session-message
 
 ## Important Notes
 
-- No test framework is currently configured (add Vitest if needed)
+- Test framework: Vitest (`pnpm test`)
 - Docker support available via multi-stage Dockerfile
 - tmux-urls.cfg contains URL shortcuts for quick browser access
 - The app specifically visualizes Claude Code session data from the local filesystem

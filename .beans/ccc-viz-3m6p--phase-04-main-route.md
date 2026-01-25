@@ -1,10 +1,11 @@
 ---
 # ccc-viz-3m6p
 title: 'Phase 04: Main Route'
-status: todo
+status: in-progress
 type: task
+priority: normal
 created_at: 2026-01-25T17:11:58Z
-updated_at: 2026-01-25T17:11:58Z
+updated_at: 2026-01-25T19:03:21Z
 ---
 
 **Depends on:** Phase 03: UI Components
