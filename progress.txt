@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-0qde (Phase 03 - UI Components)
+
+- Created 3 kanban UI components: KanbanCard, KanbanColumn, KanbanBoard
+- Files changed: `app/components/KanbanCard.tsx`, `KanbanColumn.tsx`, `KanbanBoard.tsx`
+- **Learnings:**
+  - KanbanCard: click-to-edit title via useState, HTML5 drag with dataTransfer
+  - KanbanColumn: receives isDragOver prop for visual feedback on drop zone
+  - KanbanBoard: useMemo for filtering/grouping cards, search + project dropdown
+  - Components follow existing patterns from MobileNav for styling consistency
+
+---
+
 ## 2026-01-25 - ccc-viz-znao (Phase 02 - API Routes)
 
 - Created 3 kanban API routes
