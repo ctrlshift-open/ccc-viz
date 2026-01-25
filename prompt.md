@@ -1,30 +1,43 @@
-<context>
- we have a great start at visualizing the sessions.
+# Ralph Agent Instructions
 
-app/routes/$project.sessions.$sessionId.tsx
+## Your Task
 
-there is another npm cli tool, ccuage, that is able to calculate detailed session and token cost
+1. Read `ralph/overview.md`
+2. Query phase beans: `beans query '{ beans(filter: { search: "Phase" }) { id title status body } }'`
+3. Read `progress.txt` (check Codebase Patterns first)
+4. Check you're on the correct branch
+5. Pick highest priority incomplete phase bean
+6. Implement ONE task from that phase
+7. Run `pnpm typecheck && pnpm test`
+8. Update CLAUDE.md file with learnings
+9. Commit: `feat: [Phase] - [Task]`
+10. Update phase bean checklist (mark completed tasks)
+11. Append learnings to progress.txt
+12. Push all changes
+13. If no PR exists for this branch, create one with `gh pr create`
+14. After pushing, check CI status with `gh run list --limit 5` and verify the latest run passes
 
-https://github.com/ryoppippi/ccusage
-</context>
+## Progress Format
 
-<task>
+APPEND to progress.txt:
 
-we need to add cost calculations into the session messages.
+## [Date] - [Story ID]
 
-can we leverage ccusage as a package to do this for us so we can display the cost of any json object in the jsonl as well as session and project totals?
-</task
+- What was implemented
+- Files changed
+- **Learnings:**
+  - Patterns discovered
+  - Gotchas encountered
 
-<controls>
-ultrathink
+---
 
-Before answering: create a private 5–7 item rubric for excellence on this task.
+## Codebase Patterns
 
-Draft your answer, then self-critique against the rubric and retake until it passes.
+Add reusable patterns to the TOP
+of progress.txt:
 
-Keep the rubric and critiques internal. Only show the final, best version.
+## Codebase Patterns
 
-If uncertain, generate one internal alternate and choose the stronger result.
-
-Stop as soon as all rubric criteria are met at a high standard.
-</controls>
+- pnpm: package manager
+- vitest: test framework
+- React Router 7 with SSR
