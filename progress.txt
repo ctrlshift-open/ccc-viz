@@ -6,6 +6,20 @@
 
 - API routes use dynamic imports for server modules: `await import("~/utils/kanban.server")`
 
+- Main route pattern: loader fetches data + syncs state, action handles mutations via fetcher
+
+---
+
+## 2026-01-25 - ccc-viz-3m6p (Phase 04 - Main Route)
+
+- Created `app/routes/kanban.tsx` - main route for kanban board
+- Files changed: `app/routes/kanban.tsx`, `CLAUDE.md`
+- **Learnings:**
+  - Loader: calls `syncSessionsToCards()` then `getProjects()` for dropdown
+  - Action: uses `intent` form field to switch between move/updateTitle handlers
+  - useFetcher for optimistic-feeling updates without full page reload
+  - KanbanBoard component receives projects as string[] for filter dropdown
+
 ---
 
 ## 2026-01-25 - ccc-viz-0qde (Phase 03 - UI Components)
