@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-tajp
+
+- Created CLI migration script for bulk AI title generation
+- Files changed:
+  - scripts/migrate-titles.ts - standalone script to migrate pre-AI cards
+  - package.json - added `migrate:titles` script
+- **Learnings:**
+  - Use `npx tsx` for running TypeScript scripts directly
+  - Script is resume-safe: saves after each card so interruption won't lose progress
+  - Filters cards by `version === undefined` to find unmigrated cards
+  - Progress format: `[1/50] Processing: "Old Title" → "New Title"`
+
+---
+
 ## 2026-01-25 - ccc-viz-fzve
 
 - Added single card title regeneration with AI

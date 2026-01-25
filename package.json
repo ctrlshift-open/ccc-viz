@@ -19,6 +19,7 @@
     "bg:status": "[ -f tmp/server.pid ] && ps -p $(cat tmp/server.pid) >/dev/null && echo 'Server running (PID: '$(cat tmp/server.pid)')' || echo 'Server not running'",
     "bg:restart": "pnpm run bg:stop && sleep 2 && pnpm run bg:dev",
     "bg:clean": "rm -rf tmp/",
+    "migrate:titles": "npx tsx scripts/migrate-titles.ts",
     "prepack": "react-router build"
   },
   "bin": {
