@@ -277,12 +277,14 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
     .map(c => c.order);
   let nextOrder = existingOrders.length > 0 ? Math.max(...existingOrders) + 1 : 0;
 
-  // Create cards for new sessions
-  // Note: AI title generation disabled during sync to avoid rate limits
-  // Use migrate:titles script or regenerate button for AI titles
+  // Create cards for new sessions with AI-generated titles
+  // Running sequentially to avoid Claude CLI rate limits
   const newCards: KanbanCard[] = [];
-  for (const session of newSessions) {
-    const { title, version } = await generateTitle(session.project, session.sessionId, false);
+  for (let i = 0; i < newSessions.length; i++) {
+    const session = newSessions[i];
+    console.log(`[kanban] Generating title for card ${i + 1}/${newSessions.length}: ${session.project}/${session.sessionId.slice(0, 8)}...`);
+    const { title, version } = await generateTitle(session.project, session.sessionId, true);
+    console.log(`[kanban]   → "${title}"${version ? " (AI)" : " (fallback)"}`);
     const preview = await getSessionPreview(session.project, session.sessionId);
 
     newCards.push({
@@ -311,6 +313,10 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
   };
 
   await saveKanbanState(updatedState);
+
+  const aiCount = newCards.filter(c => c.version === 1).length;
+  console.log(`[kanban] Sync complete: ${newCards.length} new cards (${aiCount} AI-titled, ${newCards.length - aiCount} fallback)`);
+
   return updatedState;
 }
 

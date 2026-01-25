@@ -1,8 +1,8 @@
-# Kanban Board for Session Organization
+# AI-Generated Kanban Card Titles
 
 ## Scope
 
-Add kanban board view to organize Claude Code sessions with 5 columns: archive, back-log, in-progress, discard, complete. Auto-create cards from sessions with ability to merge multiple sessions into one card.
+Enhance kanban cards with AI-generated titles using Claude CLI with haiku model. Titles generated from session content (user prompts + assistant responses).
 
 ---
 
@@ -10,12 +10,10 @@ Add kanban board view to organize Claude Code sessions with 5 columns: archive, 
 
 | Phase | Name | Status | Bean ID |
 |-------|------|--------|---------|
-| 01 | Foundation | todo | ccc-viz-o1b7 |
-| 02 | API Routes | todo | ccc-viz-znao |
-| 03 | UI Components | todo | ccc-viz-0qde |
-| 04 | Main Route | todo | ccc-viz-3m6p |
-| 05 | Merging | todo | ccc-viz-6bca |
-| 06 | Navigation | todo | ccc-viz-9qf3 |
+| 01 | Core AI Title Generation | completed | ccc-viz-l7gt |
+| 02 | Apply During Card Creation | completed | ccc-viz-w2eu |
+| 03 | Single Card Regeneration | todo | ccc-viz-fzve |
+| 04 | CLI Migration Script | todo | ccc-viz-tajp |
 
 Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title status } }'`
 
@@ -24,22 +22,10 @@ Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title stat
 ## Dependencies
 
 ```
-Phase 01 (Foundation)
-    │
-    ▼
-Phase 02 (API Routes)
-    │
-    ▼
-Phase 03 (UI Components)
-    │
-    ▼
-Phase 04 (Main Route)
-    │
-    ▼
-Phase 05 (Merging)
-    │
-    ▼
-Phase 06 (Navigation)
+Phase 01 (Core AI Title Generation)
+    ├── Phase 02 (Apply During Card Creation)
+    ├── Phase 03 (Single Card Regeneration)
+    └── Phase 04 (CLI Migration Script)
 ```
 
 ---
@@ -50,12 +36,13 @@ Phase 06 (Navigation)
 |---------|---------|
 | Dev server | `pnpm dev` |
 | Type check | `pnpm typecheck` |
-| Unit tests | `pnpm test` |
-| E2E tests | `pnpm e2e` |
+| Run tests | `pnpm test` |
 | Build | `pnpm build` |
+| E2E tests | `pnpm e2e` |
 
 ---
 
 ## Related Docs
 
 - [CLAUDE.md](../CLAUDE.md) - Project guidance
+

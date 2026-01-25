@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-w2eu
+
+- Enabled AI title generation during card creation sync
+- Files changed:
+  - app/utils/kanban.server.ts - updated syncSessionsToCards() to use AI titles with progress logging
+- **Learnings:**
+  - Sequential loop already in place; just needed to flip useAI flag from false to true
+  - Added per-card logging showing session and generated title with AI/fallback indicator
+  - Summary log at end shows total cards and breakdown of AI vs fallback titles
+
+---
+
 ## 2026-01-25 - ccc-viz-l7gt
 
 - Implemented core AI title generation for kanban cards
