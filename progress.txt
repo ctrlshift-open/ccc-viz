@@ -17,3 +17,17 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-o1b7 (Phase 01 - Server Utils)
+
+- Created `app/utils/kanban.server.ts` with server-side state management
+- Files changed: `app/utils/kanban.server.ts`, `package.json` (added nanoid)
+- **Learnings:**
+  - State stored at `~/.claude/cc-viz/kanban.json`
+  - Uses nanoid for generating card IDs
+  - `syncSessionsToCards()` handles initial import (→ archive) vs subsequent imports (→ in-progress)
+  - `generateTitle()` extracts title from git branch or last message
+  - Reuses `getSessionPreview()` and `getProjects()` from existing server utils
+  - Standard Node.js imports (fs, path, os) ok at top-level for .server.ts files
+
+---
+
