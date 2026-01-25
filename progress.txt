@@ -6,3 +6,14 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-o1b7 (Phase 01)
+
+- Created `app/types/kanban.ts` with kanban board types
+- Files changed: `app/types/kanban.ts`
+- **Learnings:**
+  - Types include: KanbanStatus, KanbanCard, KanbanState, CreateCardInput, UpdateCardInput, MergeCardsInput
+  - Column order: archive, back-log, in-progress, discard, complete
+  - Cards track sessionIds array for merge support
+
+---
+
