@@ -40,6 +40,8 @@ export type KanbanCard = {
   createdAt: string;
   /** Last modification time */
   updatedAt: string;
+  /** Title generation version - used to track AI-generated titles */
+  version?: number;
 };
 
 /** Full kanban state stored in ~/.claude/cc-viz/kanban.json */

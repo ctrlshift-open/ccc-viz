@@ -2,14 +2,19 @@
  * Server-side utilities for kanban board state management
  */
 
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import type { KanbanState, KanbanCard, KanbanStatus, CreateCardInput } from "~/types/kanban";
 import { createEmptyKanbanState } from "~/types/kanban";
 import { getSessionPreview } from "~/sessions.server";
 import { getProjects } from "~/projects.server";
+import { resolveSessionFile } from "~/utils/path-safety.server";
+
+const execAsync = promisify(exec);
 
 /** Path to kanban state file */
 function kanbanStatePath(): string {
@@ -20,6 +25,117 @@ function kanbanStatePath(): string {
 async function ensureDir(): Promise<void> {
   const dir = path.dirname(kanbanStatePath());
   await fs.mkdir(dir, { recursive: true });
+}
+
+/**
+ * Extract first/last user and assistant messages from a session file
+ * Returns content suitable for AI title generation
+ */
+export async function extractSessionContent(project: string, sessionId: string): Promise<string | null> {
+  const { file } = resolveSessionFile(project, sessionId);
+
+  try {
+    const content = await fs.readFile(file, "utf8");
+    const lines = content.split(/\r?\n/).filter((l) => l.length > 0);
+
+    const userMessages: string[] = [];
+    const assistantMessages: string[] = [];
+
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+
+        // Extract user messages
+        if (parsed.type === "user" && parsed.message) {
+          const msgContent = parsed.message.content;
+          let text = "";
+          if (Array.isArray(msgContent)) {
+            const textItem = msgContent.find(c => typeof c === "string" || c.type === "text");
+            text = typeof textItem === "string" ? textItem : textItem?.text || "";
+          } else if (typeof msgContent === "string") {
+            text = msgContent;
+          }
+          // Skip commands
+          if (text && !text.startsWith("/")) {
+            userMessages.push(text.slice(0, 500));
+          }
+        }
+
+        // Extract assistant messages
+        if (parsed.type === "assistant" && parsed.message) {
+          const msgContent = parsed.message.content;
+          if (Array.isArray(msgContent)) {
+            const textItem = msgContent.find(c => c.type === "text");
+            if (textItem?.text) {
+              assistantMessages.push(textItem.text.slice(0, 500));
+            }
+          } else if (typeof msgContent === "string") {
+            assistantMessages.push(msgContent.slice(0, 500));
+          }
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+
+    if (userMessages.length === 0 && assistantMessages.length === 0) {
+      return null;
+    }
+
+    // Build context with first and last messages
+    const parts: string[] = [];
+
+    if (userMessages.length > 0) {
+      parts.push(`First user message:\n${userMessages[0]}`);
+      if (userMessages.length > 1) {
+        parts.push(`Last user message:\n${userMessages[userMessages.length - 1]}`);
+      }
+    }
+
+    if (assistantMessages.length > 0) {
+      parts.push(`First assistant response:\n${assistantMessages[0]}`);
+      if (assistantMessages.length > 1) {
+        parts.push(`Last assistant response:\n${assistantMessages[assistantMessages.length - 1]}`);
+      }
+    }
+
+    return parts.join("\n\n---\n\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate AI title using Claude CLI with haiku model
+ * @param contentFilePath Path to temp file with session content
+ * @returns Generated title or null on failure
+ */
+export async function generateAITitle(contentFilePath: string): Promise<string | null> {
+  const prompt = `Read the conversation excerpts and generate a concise title (3-7 words) that captures the main topic or goal. Output ONLY the title, no quotes, no explanation.`;
+
+  try {
+    const { stdout } = await execAsync(
+      `claude --model haiku --print "${prompt}" < "${contentFilePath}"`,
+      { timeout: 30000 }
+    );
+
+    const title = stdout.trim();
+    // Validate output - should be a reasonable title
+    if (title && title.length > 0 && title.length < 100 && !title.includes("\n")) {
+      return title;
+    }
+    return null;
+  } catch (error) {
+    console.error("AI title generation failed:", error);
+    return null;
+  } finally {
+    // Clean up temp file
+    try {
+      await fs.unlink(contentFilePath);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 /**
@@ -52,9 +168,29 @@ export async function saveKanbanState(state: KanbanState): Promise<void> {
 
 /**
  * Generate a title for a card from session data
- * Tries to extract meaningful info from the session
+ * Tries AI generation first, then falls back to git branch / last message
  */
-export async function generateTitle(project: string, sessionId: string): Promise<string> {
+export async function generateTitle(project: string, sessionId: string, useAI = true): Promise<{ title: string; version?: number }> {
+  // Try AI-powered title generation first
+  if (useAI) {
+    try {
+      const sessionContent = await extractSessionContent(project, sessionId);
+      if (sessionContent) {
+        // Write to temp file for claude CLI
+        const tempFile = path.join(tmpdir(), `kanban-title-${nanoid(8)}.txt`);
+        await fs.writeFile(tempFile, sessionContent, "utf8");
+
+        const aiTitle = await generateAITitle(tempFile);
+        if (aiTitle) {
+          return { title: aiTitle, version: 1 };
+        }
+      }
+    } catch (error) {
+      console.error("AI title generation failed, falling back:", error);
+    }
+  }
+
+  // Fallback to traditional title generation
   try {
     const preview = await getSessionPreview(project, sessionId);
     if (preview) {
@@ -65,18 +201,18 @@ export async function generateTitle(project: string, sessionId: string): Promise
           .replace(/^(feature|fix|bug|chore|refactor)\//, "")
           .replace(/-/g, " ")
           .replace(/_/g, " ");
-        return branch.charAt(0).toUpperCase() + branch.slice(1);
+        return { title: branch.charAt(0).toUpperCase() + branch.slice(1) };
       }
       // Use last message truncated
       if (preview.lastMessage && preview.lastMessage !== "Session in progress") {
-        return preview.lastMessage.slice(0, 50) + (preview.lastMessage.length > 50 ? "..." : "");
+        return { title: preview.lastMessage.slice(0, 50) + (preview.lastMessage.length > 50 ? "..." : "") };
       }
     }
   } catch {
     // Ignore errors, fall back to session ID
   }
   // Fallback to session ID
-  return `Session ${sessionId.slice(0, 8)}`;
+  return { title: `Session ${sessionId.slice(0, 8)}` };
 }
 
 /**
@@ -142,9 +278,11 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
   let nextOrder = existingOrders.length > 0 ? Math.max(...existingOrders) + 1 : 0;
 
   // Create cards for new sessions
+  // Note: AI title generation disabled during sync to avoid rate limits
+  // Use migrate:titles script or regenerate button for AI titles
   const newCards: KanbanCard[] = [];
   for (const session of newSessions) {
-    const title = await generateTitle(session.project, session.sessionId);
+    const { title, version } = await generateTitle(session.project, session.sessionId, false);
     const preview = await getSessionPreview(session.project, session.sessionId);
 
     newCards.push({
@@ -157,6 +295,7 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
       gitBranch: preview?.gitBranch,
       createdAt: session.timestamp,
       updatedAt: new Date().toISOString(),
+      version,
     });
   }
 
