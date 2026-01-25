@@ -420,8 +420,36 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           })
           .filter(({ status, filepath }) =>
             (status === '??' || status === 'A' || status === 'M' || status.includes('M')) &&
-            filepath.endsWith('.md')
+            (filepath.endsWith('.md') || filepath === 'progress.txt' || filepath.endsWith('/progress.txt'))
           );
+
+        // Always include .beans.md and progress.txt files even without git changes
+        const { existsSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const { readdirSync } = await import("node:fs");
+
+        const alwaysShowFiles = ['progress.txt'];
+
+        // Check for .beans.md files in .beans directory
+        const beansDir = join(workingDirectory, '.beans');
+        if (existsSync(beansDir)) {
+          try {
+            const beansFiles = readdirSync(beansDir)
+              .filter(f => f.endsWith('.md'))
+              .map(f => `.beans/${f}`);
+            alwaysShowFiles.push(...beansFiles);
+          } catch {
+            // Ignore errors reading .beans directory
+          }
+        }
+
+        // Add files that exist but aren't already in the list
+        for (const file of alwaysShowFiles) {
+          const fullPath = join(workingDirectory, file);
+          if (existsSync(fullPath) && !modifiedMdFiles.some(f => f.filepath === file)) {
+            modifiedMdFiles.push({ filepath: file, status: 'tracked' });
+          }
+        }
       }
     } catch (error) {
       console.error("[loader] Failed to get git status:", error);
@@ -1178,9 +1206,15 @@ export default function SessionDetails() {
                 const statusColor =
                   file.status === "??" || file.status === "A"
                     ? "bg-green-900 text-green-200 border-green-700"
+                    : file.status === "tracked"
+                    ? "bg-blue-900 text-blue-200 border-blue-700"
                     : "bg-yellow-900 text-yellow-200 border-yellow-700";
                 const statusLabel =
-                  file.status === "??" || file.status === "A" ? "New" : "Modified";
+                  file.status === "??" || file.status === "A"
+                    ? "New"
+                    : file.status === "tracked"
+                    ? "Tracked"
+                    : "Modified";
 
                 return (
                   <button
@@ -1236,9 +1270,9 @@ export default function SessionDetails() {
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                 />
               </svg>
-              <p className="text-sm">No new or modified .md files in this session</p>
+              <p className="text-sm">No tracked files in this session</p>
               <p className="text-xs text-gray-600 mt-1">
-                Only files with git status changes are shown
+                Shows .beans/*.md, progress.txt, and modified .md files
               </p>
             </div>
           )}

@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-01-25 - ccc-viz-bjgl
+
+- Added beans and progress file visibility to session detail sidebar
+- Files changed:
+  - app/routes/$project.sessions.$sessionId.tsx - show .beans/*.md and progress.txt
+- **Learnings:**
+  - existsSync, readdirSync need dynamic import in loader for SSR
+  - "Tracked" status with blue badge for files without git changes
+  - Extends modifiedMdFiles array with always-show files
+
+---
+
 ## 2026-01-25 - ccc-viz-tajp (verification)
 
 - Verified Phase 04 CLI migration script and Phase 03 single card regeneration
