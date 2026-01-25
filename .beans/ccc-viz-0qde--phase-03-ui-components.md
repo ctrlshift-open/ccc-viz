@@ -1,27 +1,28 @@
 ---
 # ccc-viz-0qde
 title: 'Phase 03: UI Components'
-status: todo
+status: completed
 type: task
+priority: normal
 created_at: 2026-01-25T17:11:57Z
-updated_at: 2026-01-25T17:11:57Z
+updated_at: 2026-01-25T19:00:38Z
 ---
 
 **Depends on:** Phase 02: API Routes
 
 ## Tasks
 
-- [ ] Create `KanbanCard.tsx`:
+- [x] Create `KanbanCard.tsx`:
   - Show: title, project badge, git branch (🌿 icon), timestamp, message count
   - Editable title - click to edit inline
   - Draggable with HTML5 DnD
   - Link to session detail
   - Badge for merged cards "[3 sessions]"
-- [ ] Create `KanbanColumn.tsx`:
+- [x] Create `KanbanColumn.tsx`:
   - Column header with status + count
   - Drop zone
   - Card list
-- [ ] Create `KanbanBoard.tsx`:
+- [x] Create `KanbanBoard.tsx`:
   - 5 columns layout (horizontal scroll mobile)
   - Search input - filter cards by title text
   - Project filter dropdown
@@ -29,5 +30,5 @@ updated_at: 2026-01-25T17:11:57Z
 
 ## Verification
 
-- [ ] Tests pass: `pnpm test`
-- [ ] No type errors: `pnpm typecheck`
+- [x] Tests pass: `pnpm test`
+- [x] No type errors: `pnpm typecheck`
