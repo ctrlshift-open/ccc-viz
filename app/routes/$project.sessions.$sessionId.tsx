@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { Link, useFetcher, useLoaderData, useLocation, useNavigate } from "react-router";
 import { MessageTypeIcon, getMessageTypeIcon } from "~/components/MessageTypeIcon";
 import { CancelButton } from "~/components/CancelButton";
+import { FileViewer } from "~/welcome/FileViewer";
 import type { Route } from "./+types/$project.sessions.$sessionId";
 import { formatUSD, costColorHex } from "~/utils/format";
 
@@ -41,6 +42,79 @@ export async function action({ request, params }: Route.ActionArgs) {
   const project = params.project!;
   const sessionId = params.sessionId!;
   const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  // Handle file reading intent
+  if (intent === "readFile") {
+    const filepath = formData.get("filepath");
+
+    if (!filepath || typeof filepath !== "string") {
+      return { success: false, error: "File path is required" };
+    }
+
+    const { resolveSessionFile } = await import("~/utils/path-safety.server");
+    const { file } = resolveSessionFile(project, sessionId);
+    const { readFile } = await import("node:fs/promises");
+    const { join, resolve, relative } = await import("node:path");
+    const { stat } = await import("node:fs/promises");
+
+    try {
+      // Get working directory from session file
+      const content = await readFile(file, "utf8");
+      const lines = content.split("\n").filter(l => l.trim());
+      let workingDirectory = "/";
+
+      for (let i = 0; i < Math.min(20, lines.length); i++) {
+        try {
+          const parsed = JSON.parse(lines[i]);
+          if (parsed.cwd && typeof parsed.cwd === "string") {
+            workingDirectory = parsed.cwd;
+            break;
+          }
+        } catch {
+          // Skip invalid JSON lines
+        }
+      }
+
+      if (workingDirectory === "/") {
+        return { success: false, error: "Could not determine working directory" };
+      }
+
+      // Resolve and validate file path
+      const fullPath = resolve(workingDirectory, filepath);
+      const relativePath = relative(workingDirectory, fullPath);
+
+      // Security check: prevent directory traversal
+      if (relativePath.startsWith('..') || fullPath.indexOf(workingDirectory) !== 0) {
+        return { success: false, error: "Invalid file path - outside project directory" };
+      }
+
+      // Check file size (max 1MB)
+      const stats = await stat(fullPath);
+      if (stats.size > 1024 * 1024) {
+        return { success: false, error: "File too large (max 1MB)" };
+      }
+
+      // Read file contents
+      const fileContent = await readFile(fullPath, "utf8");
+
+      return {
+        success: true,
+        filepath,
+        content: fileContent,
+        size: stats.size,
+      };
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return { success: false, error: "File not found" };
+      } else if (error.code === 'EACCES') {
+        return { success: false, error: "Permission denied" };
+      }
+      return { success: false, error: `Failed to read file: ${error.message}` };
+    }
+  }
+
+  // Handle prompt submission intent (default)
   const prompt = formData.get("prompt");
   const model = formData.get("model");
 
@@ -311,6 +385,49 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       // If ccusage import fails, continue without cost info
     }
 
+    // Detect new/modified .md files using git status
+    let modifiedMdFiles: Array<{ filepath: string; status: string }> = [];
+    let workingDirectory = "/";
+    try {
+      // Read working directory from session file (same as action does)
+      for (let i = 0; i < Math.min(20, allLines.length); i++) {
+        try {
+          const parsed = JSON.parse(allLines[i]);
+          if (parsed.cwd && typeof parsed.cwd === "string") {
+            workingDirectory = parsed.cwd;
+            break;
+          }
+        } catch {
+          // Skip invalid JSON lines
+        }
+      }
+
+      if (workingDirectory !== "/") {
+        // Dynamically import execSync to avoid SSR issues
+        const { execSync } = await import("node:child_process");
+        const gitStatus = execSync("git status --porcelain", {
+          cwd: workingDirectory,
+          encoding: "utf-8"
+        });
+
+        modifiedMdFiles = gitStatus
+          .split("\n")
+          .filter(line => line.trim())
+          .map(line => {
+            const status = line.substring(0, 2).trim();
+            const filepath = line.substring(3).trim();
+            return { status, filepath };
+          })
+          .filter(({ status, filepath }) =>
+            (status === '??' || status === 'A' || status === 'M' || status.includes('M')) &&
+            filepath.endsWith('.md')
+          );
+      }
+    } catch (error) {
+      console.error("[loader] Failed to get git status:", error);
+      // Continue without file list - not critical
+    }
+
     return {
       baseDir,
       project,
@@ -322,6 +439,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       totals,
       messageCostScale,
       currentCtx: (globalThis as any)._ccvizCurrentCtx,
+      modifiedMdFiles,
+      workingDirectory,
     };
   } catch (error) {
     return {
@@ -333,6 +452,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       categories: [],
       meta: { total: 0, limit, cursor, nextCursor: null, dir },
       error: `Failed to read session: ${(error as Error).message}`,
+      modifiedMdFiles: [],
+      workingDirectory: "/",
     };
   }
 }
@@ -364,6 +485,40 @@ export default function SessionDetails() {
   const [lastEventTimestamp, setLastEventTimestamp] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const [pendingDir, setPendingDir] = useState<Dir | null>(null);
+
+  // Files tab state
+  const [viewMode, setViewMode] = useState<"messages" | "files">("messages");
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const fileFetcher = useFetcher<any>();
+
+  // Handle file click
+  const handleFileClick = (filepath: string) => {
+    setSelectedFile(filepath);
+    const formData = new FormData();
+    formData.append("intent", "readFile");
+    formData.append("filepath", filepath);
+    fileFetcher.submit(formData, { method: "post" });
+  };
+
+  // Update file content when fetcher completes
+  useEffect(() => {
+    if (fileFetcher.state === "idle" && fileFetcher.data) {
+      const data = fileFetcher.data as any;
+      if (data.success && data.content) {
+        setFileContent(data.content);
+      } else if (!data.success && data.error) {
+        alert(`Error loading file: ${data.error}`);
+        setSelectedFile(null);
+      }
+    }
+  }, [fileFetcher.state, fileFetcher.data]);
+
+  // Close file viewer
+  const handleCloseFile = () => {
+    setSelectedFile(null);
+    setFileContent(null);
+  };
 
   // Update document title when status changes
   useEffect(() => {
@@ -889,7 +1044,38 @@ export default function SessionDetails() {
         </div>
       </div>
 
-      {condensed && catOptions.length > 0 ? (
+      {/* View mode toggle: Messages vs Files */}
+      <div className="mb-3 flex flex-wrap gap-2 items-center">
+        <button
+          type="button"
+          onClick={() => setViewMode("messages")}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            viewMode === "messages"
+              ? "bg-blue-900 text-blue-200 border-blue-600"
+              : "bg-gray-900 text-gray-300 border-gray-600 hover:bg-gray-800"
+          }`}
+        >
+          Messages
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("files")}
+          className={`px-3 py-1.5 rounded border text-sm inline-flex items-center gap-1 ${
+            viewMode === "files"
+              ? "bg-blue-900 text-blue-200 border-blue-600"
+              : "bg-gray-900 text-gray-300 border-gray-600 hover:bg-gray-800"
+          }`}
+        >
+          Files
+          {data.modifiedMdFiles && data.modifiedMdFiles.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-xs font-medium">
+              {data.modifiedMdFiles.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {condensed && viewMode === "messages" && catOptions.length > 0 ? (
         <div className="mb-3 rounded border border-gray-600 bg-black p-2 overflow-x-hidden">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs sm:text-sm text-gray-400">Expand types:</span>
@@ -983,12 +1169,91 @@ export default function SessionDetails() {
         }}
       />
 
-      {data.error ? (
-        <div className="text-red-600">{data.error}</div>
-      ) : items.length === 0 ? (
-        <div className="text-gray-600">No JSON lines found.</div>
-      ) : (
-        <div className={condensed ? "flex flex-wrap gap-2" : "grid gap-3"}>
+      {/* File Grid View */}
+      {viewMode === "files" && (
+        <div className="space-y-3">
+          {data.modifiedMdFiles && data.modifiedMdFiles.length > 0 ? (
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+              {data.modifiedMdFiles.map((file) => {
+                const statusColor =
+                  file.status === "??" || file.status === "A"
+                    ? "bg-green-900 text-green-200 border-green-700"
+                    : "bg-yellow-900 text-yellow-200 border-yellow-700";
+                const statusLabel =
+                  file.status === "??" || file.status === "A" ? "New" : "Modified";
+
+                return (
+                  <button
+                    key={file.filepath}
+                    type="button"
+                    onClick={() => handleFileClick(file.filepath)}
+                    className="rounded border border-gray-600 bg-gray-900 hover:bg-gray-800 p-4 text-left transition-colors min-h-[80px] flex flex-col gap-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <svg
+                        className="w-5 h-5 text-blue-400 shrink-0 mt-0.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white break-words">
+                          {file.filepath.split("/").pop()}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {file.filepath.split("/").slice(0, -1).join("/") || "."}
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded border text-xs ${statusColor} shrink-0`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 py-8">
+              <svg
+                className="w-12 h-12 mx-auto mb-3 text-gray-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              <p className="text-sm">No new or modified .md files in this session</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Only files with git status changes are shown
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Messages View */}
+      {viewMode === "messages" && (
+        <>
+          {data.error ? (
+            <div className="text-red-600">{data.error}</div>
+          ) : items.length === 0 ? (
+            <div className="text-gray-600">No JSON lines found.</div>
+          ) : (
+            <div className={condensed ? "flex flex-wrap gap-2" : "grid gap-3"}>
           {dir === "desc" && pendingPrompts.map((pending) => (
             <div
               key={pending.id}
@@ -1049,6 +1314,17 @@ export default function SessionDetails() {
             {nextCursor ? (fetcher.state === "idle" ? "Load more…" : "Loading…") : "End of results"}
           </div>
         </div>
+          )}
+        </>
+      )}
+
+      {/* File Viewer Modal */}
+      {selectedFile && fileContent && (
+        <FileViewer
+          filepath={selectedFile}
+          content={fileContent}
+          onClose={handleCloseFile}
+        />
       )}
     </main>
   );

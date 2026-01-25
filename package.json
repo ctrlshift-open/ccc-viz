@@ -38,8 +38,8 @@
     "@react-router/fs-routes": "^7.8.2",
     "@react-router/node": "^7.7.1",
     "@react-router/serve": "^7.7.1",
-    "ccusage": "^16.2.3",
     "ansi_up": "^6.0.6",
+    "ccusage": "^16.2.3",
     "isbot": "^5.1.27",
     "lucide-react": "^0.542.0",
     "react": "^19.1.0",
@@ -48,17 +48,18 @@
     "react-router": "^7.7.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.2",
     "@react-router/dev": "^7.7.1",
     "@tailwindcss/vite": "^4.1.4",
     "@types/node": "^20",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
-    "vitest": "^2.1.1",
+    "playwright": "^1.56.1",
     "tailwindcss": "^4.1.4",
     "typescript": "^5.8.3",
     "vite": "^6.3.3",
-    "@playwright/test": "^1.48.2",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.1"
   },
   "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977"
 }
