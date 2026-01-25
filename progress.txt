@@ -8,6 +8,20 @@
 
 - Main route pattern: loader fetches data + syncs state, action handles mutations via fetcher
 
+- Card-on-card drop for merge: use onDragOver/onDrop with stopPropagation to prevent column drop
+
+---
+
+## 2026-01-25 - ccc-viz-6bca (Phase 05 - Merging)
+
+- Implemented card merge UX: drag card onto another shows confirmation modal
+- Files changed: `KanbanCard.tsx`, `KanbanColumn.tsx`, `KanbanBoard.tsx`, `kanban.tsx`
+- **Learnings:**
+  - Added onCardDrop/isDragTarget props to KanbanCard for card-on-card drops
+  - e.stopPropagation() in card's drop handler prevents column from also firing
+  - Merge confirmation modal stored as state with sourceCard/targetCard
+  - Uses existing mergeCards() from kanban.server.ts via new "merge" intent in action
+
 ---
 
 ## 2026-01-25 - ccc-viz-3m6p (Phase 04 - Main Route)

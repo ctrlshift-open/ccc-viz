@@ -70,6 +70,23 @@ export async function action({ request }: Route.ActionArgs) {
     return { success: true };
   }
 
+  if (intent === "merge") {
+    const sourceId = formData.get("sourceId");
+    const targetId = formData.get("targetId");
+
+    if (typeof sourceId !== "string" || typeof targetId !== "string") {
+      return { error: "Invalid merge request" };
+    }
+
+    const { getKanbanState, saveKanbanState, mergeCards } = await import("~/utils/kanban.server");
+
+    const state = await getKanbanState();
+    const updatedState = mergeCards(state, sourceId, targetId);
+    await saveKanbanState(updatedState);
+
+    return { success: true };
+  }
+
   return { error: "Unknown intent" };
 }
 
@@ -91,6 +108,13 @@ export default function Kanban() {
     );
   };
 
+  const handleMerge = (sourceId: string, targetId: string) => {
+    fetcher.submit(
+      { intent: "merge", sourceId, targetId },
+      { method: "post" }
+    );
+  };
+
   return (
     <main className="p-4 pt-16 md:pt-4 h-screen flex flex-col">
       <h1 className="text-xl font-semibold mb-4">Kanban Board</h1>
@@ -100,6 +124,7 @@ export default function Kanban() {
           projects={projects}
           onCardMove={handleCardMove}
           onTitleChange={handleTitleChange}
+          onMerge={handleMerge}
         />
       </div>
     </main>

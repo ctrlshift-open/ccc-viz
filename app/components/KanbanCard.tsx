@@ -7,9 +7,11 @@ type Props = {
   onTitleChange?: (id: string, newTitle: string) => void;
   onDragStart?: (e: React.DragEvent, card: KanbanCardType) => void;
   onDragEnd?: (e: React.DragEvent) => void;
+  onCardDrop?: (targetCard: KanbanCardType) => void;
+  isDragTarget?: boolean;
 };
 
-export function KanbanCard({ card, onTitleChange, onDragStart, onDragEnd }: Props) {
+export function KanbanCard({ card, onTitleChange, onDragStart, onDragEnd, onCardDrop, isDragTarget }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(card.title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,12 +57,27 @@ export function KanbanCard({ card, onTitleChange, onDragStart, onDragEnd }: Prop
     return `${months[d.getMonth()]} ${d.getDate()}`;
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onCardDrop?.(card);
+  };
+
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart?.(e, card)}
       onDragEnd={(e) => onDragEnd?.(e)}
-      className="bg-gray-800 border border-gray-700 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-gray-500 transition-colors"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className={`bg-gray-800 border rounded-lg p-3 cursor-grab active:cursor-grabbing transition-colors ${
+        isDragTarget ? "border-purple-500 bg-purple-900/30" : "border-gray-700 hover:border-gray-500"
+      }`}
     >
       {/* Title - editable */}
       <div className="mb-2">

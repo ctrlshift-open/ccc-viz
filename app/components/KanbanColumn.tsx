@@ -11,6 +11,8 @@ type Props = {
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent, status: KanbanStatus) => void;
   isDragOver?: boolean;
+  onCardDrop?: (targetCard: KanbanCardType) => void;
+  dragTargetId?: string | null;
 };
 
 export function KanbanColumn({
@@ -22,6 +24,8 @@ export function KanbanColumn({
   onDragOver,
   onDrop,
   isDragOver,
+  onCardDrop,
+  dragTargetId,
 }: Props) {
   const sortedCards = [...cards].sort((a, b) => a.order - b.order);
 
@@ -58,6 +62,8 @@ export function KanbanColumn({
             onTitleChange={onTitleChange}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
+            onCardDrop={onCardDrop}
+            isDragTarget={dragTargetId === card.id}
           />
         ))}
         {cards.length === 0 && (

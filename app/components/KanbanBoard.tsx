@@ -3,18 +3,25 @@ import { KanbanColumn } from "./KanbanColumn";
 import type { KanbanCard, KanbanState, KanbanStatus } from "~/types/kanban";
 import { KANBAN_COLUMNS } from "~/types/kanban";
 
+type MergeConfirmation = {
+  sourceCard: KanbanCard;
+  targetCard: KanbanCard;
+};
+
 type Props = {
   state: KanbanState;
   projects: string[];
   onCardMove?: (cardId: string, newStatus: KanbanStatus) => void;
   onTitleChange?: (cardId: string, newTitle: string) => void;
+  onMerge?: (sourceId: string, targetId: string) => void;
 };
 
-export function KanbanBoard({ state, projects, onCardMove, onTitleChange }: Props) {
+export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onMerge }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [draggedCard, setDraggedCard] = useState<KanbanCard | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanStatus | null>(null);
+  const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
 
   // Filter cards by search and project
   const filteredCards = useMemo(() => {
@@ -70,6 +77,29 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange }: Prop
     }
     setDraggedCard(null);
     setDragOverColumn(null);
+  };
+
+  const handleCardDrop = (targetCard: KanbanCard) => {
+    if (draggedCard && draggedCard.id !== targetCard.id) {
+      // Show merge confirmation
+      setMergeConfirmation({
+        sourceCard: draggedCard,
+        targetCard,
+      });
+    }
+    setDraggedCard(null);
+    setDragOverColumn(null);
+  };
+
+  const handleMergeConfirm = () => {
+    if (mergeConfirmation) {
+      onMerge?.(mergeConfirmation.sourceCard.id, mergeConfirmation.targetCard.id);
+      setMergeConfirmation(null);
+    }
+  };
+
+  const handleMergeCancel = () => {
+    setMergeConfirmation(null);
   };
 
   return (
@@ -129,9 +159,41 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange }: Prop
             onDragOver={() => handleDragOver(status)}
             onDrop={handleDrop}
             isDragOver={dragOverColumn === status && draggedCard?.status !== status}
+            onCardDrop={handleCardDrop}
+            dragTargetId={draggedCard ? undefined : undefined}
           />
         ))}
       </div>
+
+      {/* Merge Confirmation Modal */}
+      {mergeConfirmation && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-100 mb-4">Merge Cards?</h2>
+            <p className="text-gray-300 mb-4">
+              Merge "<span className="font-medium">{mergeConfirmation.sourceCard.title}</span>" into "
+              <span className="font-medium">{mergeConfirmation.targetCard.title}</span>"?
+            </p>
+            <p className="text-sm text-gray-400 mb-6">
+              The target card will contain sessions from both cards. The source card will be deleted.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleMergeCancel}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMergeConfirm}
+                className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-500 transition-colors"
+              >
+                Merge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
