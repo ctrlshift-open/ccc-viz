@@ -1,0 +1,33 @@
+## Codebase Patterns
+
+- Package manager: pnpm
+- Test framework: vitest
+- Project type: React Router 7 with SSR
+- E2E: playwright
+- SQLite: better-sqlite3 with drizzle-orm
+
+---
+
+## 2026-01-26 - Phase 01: SQLite Database (Task 2/9)
+
+- Created app/db/schema.ts with Drizzle schema
+- Tables: stories, sessions, stories_archive, sessions_archive, metadata
+- Files changed: app/db/schema.ts, CLAUDE.md
+- **Learnings:**
+  - Drizzle uses `sqliteTable` from `drizzle-orm/sqlite-core`
+  - FK cascade deletes via `references(() => table.id, { onDelete: "cascade" })`
+  - Archive tables mirror active tables with extra `archivedAt` field
+  - Type exports: `$inferSelect` and `$inferInsert` for type inference
+
+---
+
+## 2026-01-26 - Phase 01: SQLite Database (Task 1/9)
+
+- Added SQLite dependencies: better-sqlite3, drizzle-orm, drizzle-kit, @types/better-sqlite3
+- Files changed: package.json, pnpm-lock.yaml
+- **Learnings:**
+  - pnpm warns about build scripts being ignored for native modules - `pnpm approve-builds` if needed
+  - Drizzle ORM v0.45.1 is current
+
+---
+
