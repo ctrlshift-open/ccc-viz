@@ -16,7 +16,7 @@ updated_at: 2026-01-26T13:12:39Z
 - [x] Create app/db/schema.ts - Drizzle schema (stories, sessions, stories_archive, sessions_archive)
 - [x] Create app/db/index.server.ts - DB singleton with WAL mode at ~/.claude/cc-viz/kanban.db
 - [x] Update vite.config.ts - Add ssr: { external: ["better-sqlite3"] }
-- [ ] Create app/db/queries.server.ts - Drizzle query helpers (getStories, updateStory, etc.)
+- [x] Create app/db/queries.server.ts - Drizzle query helpers (getStories, updateStory, etc.)
 - [ ] Create scripts/migrate-json-to-sqlite.ts - One-time migration from JSON
 - [ ] Create drizzle.config.ts - Drizzle Kit config for migrations
 - [ ] Update app/utils/kanban.server.ts - Replace JSON read/write with Drizzle queries
