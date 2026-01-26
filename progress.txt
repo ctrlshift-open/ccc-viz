@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-01-26 - Phase 04 Verification (ccc-viz-8r2o)
+
+- Verified all panel interactions via Playwright testing
+- Files: no changes (verification only)
+- **Learnings:**
+  - Escape key behavior: first cancels editing state, second closes panel
+  - Panel backdrop onClick uses e.target === e.currentTarget check
+  - Edit state resets on story change via useEffect on story?.id dependency
+
+---
+
 ## 2026-01-26 - Phase 04 (ccc-viz-8r2o)
 
 - Added card selection with click handler and visual ring
