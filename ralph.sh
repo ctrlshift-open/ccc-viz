@@ -7,6 +7,8 @@ PROMPT_FILE="prompt.md"
 STOP_FLAG=".ralph-stop"
 LOG_DIR=".ralph/logs"
 LOG_FILE="$LOG_DIR/ralph-$(date +%Y-%m-%d-%H-%M).log"
+TMP_OUTPUT="$LOG_DIR/.tmp-output"
+MAX_RETRIES=3
 
 # Setup
 mkdir -p "$LOG_DIR"
@@ -14,6 +16,38 @@ rm -f "$STOP_FLAG"
 
 log() {
     echo "$1" | tee -a "$LOG_FILE"
+}
+
+is_transient_error() {
+    grep -qE "No messages returned|rate limit|timeout|ECONNRESET|503|529" "$1" 2>/dev/null
+}
+
+run_claude_with_retry() {
+    local attempt=1
+    local backoff=5
+
+    while [ $attempt -le $MAX_RETRIES ]; do
+        claude --dangerously-skip-permissions --print < "$PROMPT_FILE" > "$TMP_OUTPUT" 2>&1
+        local exit_code=$?
+
+        cat "$TMP_OUTPUT" | tee -a "$LOG_FILE"
+
+        if [ $exit_code -eq 0 ] && ! is_transient_error "$TMP_OUTPUT"; then
+            return 0
+        fi
+
+        if is_transient_error "$TMP_OUTPUT"; then
+            log "Transient error detected, retry $attempt/$MAX_RETRIES in ${backoff}s..."
+            sleep $backoff
+            backoff=$((backoff * 3))
+            attempt=$((attempt + 1))
+        else
+            return $exit_code
+        fi
+    done
+
+    log "Max retries exhausted"
+    return 1
 }
 
 log "=== Ralph started $(date) ==="
@@ -32,17 +66,18 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         exit 0
     fi
 
-    # Run Claude
-    claude --dangerously-skip-permissions --print < "$PROMPT_FILE" 2>&1 | tee -a "$LOG_FILE"
+    # Run Claude with retry
+    run_claude_with_retry
     EXIT_CODE=$?
 
     if [ $EXIT_CODE -ne 0 ]; then
-        log "Claude exited with code $EXIT_CODE"
+        log "Claude failed after retries, code $EXIT_CODE"
     fi
 
     # Check for all tasks complete
     if grep -q "^ALL_TASKS_COMPLETE$" "$LOG_FILE" 2>/dev/null; then
         log "=== All tasks complete! ==="
+        rm -f "$TMP_OUTPUT"
         exit 0
     fi
 
@@ -55,5 +90,6 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     sleep $PAUSE_SECONDS
 done
 
+rm -f "$TMP_OUTPUT"
 log "=== Max iterations reached ==="
 exit 1
