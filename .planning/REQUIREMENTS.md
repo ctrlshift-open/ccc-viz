@@ -58,26 +58,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PANEL-01 | TBD | Pending |
-| PANEL-02 | TBD | Pending |
-| PANEL-03 | TBD | Pending |
-| PANEL-04 | TBD | Pending |
-| CARD-01 | TBD | Pending |
-| CARD-02 | TBD | Pending |
-| CONTENT-01 | TBD | Pending |
-| CONTENT-02 | TBD | Pending |
-| CONTENT-03 | TBD | Pending |
-| CONTENT-04 | TBD | Pending |
-| CONTENT-05 | TBD | Pending |
-| ACTION-01 | TBD | Pending |
-| ACTION-02 | TBD | Pending |
-| ACTION-03 | TBD | Pending |
+| PANEL-01 | Phase 1 | Pending |
+| PANEL-02 | Phase 1 | Pending |
+| PANEL-03 | Phase 1 | Pending |
+| PANEL-04 | Phase 1 | Pending |
+| CARD-01 | Phase 1 | Pending |
+| CARD-02 | Phase 1 | Pending |
+| CONTENT-01 | Phase 2 | Pending |
+| CONTENT-02 | Phase 2 | Pending |
+| CONTENT-03 | Phase 2 | Pending |
+| CONTENT-04 | Phase 2 | Pending |
+| CONTENT-05 | Phase 2 | Pending |
+| ACTION-01 | Phase 3 | Pending |
+| ACTION-02 | Phase 3 | Pending |
+| ACTION-03 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14 (pending roadmap creation)
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-25*
-*Last updated: 2026-01-25 after initial definition*
+*Last updated: 2026-01-25 after roadmap creation*
