@@ -4,6 +4,8 @@ import type { KanbanStory } from "~/types/kanban";
 
 type Props = {
   story: KanbanStory;
+  isSelected?: boolean;
+  onSelect?: (storyId: string) => void;
   onTitleChange?: (id: string, newTitle: string) => void;
   onPRLinkChange?: (id: string, prLink: string | null) => void;
   onArchive?: (id: string) => void;
@@ -11,7 +13,7 @@ type Props = {
   onDragEnd?: (e: React.DragEvent) => void;
 };
 
-export function StoryCard({ story, onTitleChange, onPRLinkChange, onArchive, onDragStart, onDragEnd }: Props) {
+export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLinkChange, onArchive, onDragStart, onDragEnd }: Props) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState(story.title);
   const [isEditingPRLink, setIsEditingPRLink] = useState(false);

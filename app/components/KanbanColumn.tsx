@@ -5,6 +5,8 @@ import { KANBAN_LABELS } from "~/types/kanban";
 type Props = {
   status: KanbanStatus;
   stories: KanbanStory[];
+  selectedStoryId?: string | null;
+  onStorySelect?: (storyId: string) => void;
   onTitleChange?: (id: string, newTitle: string) => void;
   onPRLinkChange?: (id: string, prLink: string | null) => void;
   onArchive?: (id: string) => void;
@@ -18,6 +20,8 @@ type Props = {
 export function KanbanColumn({
   status,
   stories,
+  selectedStoryId,
+  onStorySelect,
   onTitleChange,
   onPRLinkChange,
   onArchive,
@@ -59,6 +63,8 @@ export function KanbanColumn({
           <StoryCard
             key={story.id}
             story={story}
+            isSelected={selectedStoryId === story.id}
+            onSelect={onStorySelect}
             onTitleChange={onTitleChange}
             onPRLinkChange={onPRLinkChange}
             onArchive={onArchive}

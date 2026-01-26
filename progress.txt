@@ -7,6 +7,17 @@
 - Panel pattern: fixed position + backdrop + body scroll lock + escape key handler
 
 - Selection state pattern: useState for ID, useMemo to derive full object from state
+- Prop threading: parent passes selection state + callback, child receives isSelected + onSelect
+
+---
+
+## 2026-01-26 - Phase 03 (ccc-viz-w931)
+
+- Threaded selectedStoryId and onStorySelect props through KanbanColumn to StoryCard
+- Files changed: KanbanColumn.tsx, KanbanBoard.tsx, StoryCard.tsx (props only)
+- **Learnings:**
+  - Keep prop names consistent: parent uses IDs, child uses booleans (isSelected vs selectedStoryId)
+  - Callback naming: parent says "select", receives ID; child calls with its own ID
 
 ---
 
