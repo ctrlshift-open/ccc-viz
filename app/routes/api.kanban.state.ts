@@ -1,13 +1,13 @@
 import type { Route } from "./+types/api.kanban.state";
 
 /**
- * GET: Return current kanban state (syncs sessions first)
+ * GET: Return current kanban state (no auto-sync)
  * POST: Update entire kanban state
  */
 
 export async function loader({}: Route.LoaderArgs) {
-  const { syncSessionsToCards } = await import("~/utils/kanban.server");
-  const state = await syncSessionsToCards();
+  const { getKanbanState } = await import("~/utils/kanban.server");
+  const state = await getKanbanState();
   return Response.json(state);
 }
 
@@ -21,17 +21,17 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     const body = await request.json();
 
-    // Validate body has cards array
-    if (!body || !Array.isArray(body.cards)) {
-      return Response.json({ error: "Invalid state: missing cards array" }, { status: 400 });
+    // Validate body has stories array
+    if (!body || !Array.isArray(body.stories)) {
+      return Response.json({ error: "Invalid state: missing stories array" }, { status: 400 });
     }
 
     const currentState = await getKanbanState();
 
-    // Merge: preserve importedSessionIds, update cards
+    // Merge: update stories
     const updatedState = {
       ...currentState,
-      cards: body.cards,
+      stories: body.stories,
       lastSyncedAt: new Date().toISOString(),
     };
 

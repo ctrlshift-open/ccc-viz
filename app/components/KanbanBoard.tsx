@@ -1,89 +1,78 @@
 import { useState, useMemo } from "react";
 import { KanbanColumn } from "./KanbanColumn";
-import type { KanbanCard, KanbanState, KanbanStatus } from "~/types/kanban";
+import type { KanbanStory, KanbanState, KanbanStatus } from "~/types/kanban";
 import { KANBAN_DISPLAY_COLUMNS } from "~/types/kanban";
-
-type MergeConfirmation = {
-  sourceCard: KanbanCard;
-  targetCard: KanbanCard;
-};
 
 type Props = {
   state: KanbanState;
   projects: string[];
-  onCardMove?: (cardId: string, newStatus: KanbanStatus) => void;
-  onTitleChange?: (cardId: string, newTitle: string) => void;
-  onTitleRegenerate?: (cardId: string) => Promise<void>;
-  onMerge?: (sourceId: string, targetId: string) => void;
-  onArchive?: (cardId: string) => void;
+  onStoryMove?: (storyId: string, newStatus: KanbanStatus) => void;
+  onTitleChange?: (storyId: string, newTitle: string) => void;
+  onPRLinkChange?: (storyId: string, prLink: string | null) => void;
+  onArchive?: (storyId: string) => void;
+  onSync?: () => Promise<void>;
+  isSyncing?: boolean;
 };
 
-export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitleRegenerate, onMerge, onArchive }: Props) {
+export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRLinkChange, onArchive, onSync, isSyncing }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
-  const [draggedCard, setDraggedCard] = useState<KanbanCard | null>(null);
+  const [draggedStory, setDraggedStory] = useState<KanbanStory | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanStatus | null>(null);
-  const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
-  const [regeneratingCardId, setRegeneratingCardId] = useState<string | null>(null);
 
-  const handleTitleRegenerate = async (cardId: string) => {
-    if (!onTitleRegenerate) return;
-    setRegeneratingCardId(cardId);
-    try {
-      await onTitleRegenerate(cardId);
-    } finally {
-      setRegeneratingCardId(null);
-    }
-  };
-
-  // Filter cards by search and project (exclude archived)
-  const filteredCards = useMemo(() => {
-    return state.cards.filter((card) => {
-      // Exclude archived cards
-      if (card.status === "archive") {
+  // Filter stories by search and project (exclude archived)
+  const filteredStories = useMemo(() => {
+    return state.stories.filter((story) => {
+      // Exclude archived stories
+      if (story.status === "archive") {
         return false;
       }
       // Project filter
-      if (projectFilter !== "all" && card.project !== projectFilter) {
+      if (projectFilter !== "all" && story.project !== projectFilter) {
         return false;
       }
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        return card.title.toLowerCase().includes(query);
+        // Search in title, branch, and session names
+        return (
+          story.title.toLowerCase().includes(query) ||
+          story.branch?.toLowerCase().includes(query) ||
+          story.sessions.some(s => s.name.toLowerCase().includes(query))
+        );
       }
       return true;
     });
-  }, [state.cards, searchQuery, projectFilter]);
+  }, [state.stories, searchQuery, projectFilter]);
 
-  // Count non-archived cards for display
-  const totalNonArchivedCards = useMemo(() => {
-    return state.cards.filter((card) => card.status !== "archive").length;
-  }, [state.cards]);
+  // Count non-archived stories for display
+  const totalNonArchivedStories = useMemo(() => {
+    return state.stories.filter((story) => story.status !== "archive").length;
+  }, [state.stories]);
 
-  // Group cards by status
-  const cardsByStatus = useMemo(() => {
-    const grouped: Record<KanbanStatus, KanbanCard[]> = {
+  // Group stories by status
+  const storiesByStatus = useMemo(() => {
+    const grouped: Record<KanbanStatus, KanbanStory[]> = {
       archive: [],
       "back-log": [],
       "in-progress": [],
       discard: [],
       complete: [],
     };
-    filteredCards.forEach((card) => {
-      grouped[card.status].push(card);
+    filteredStories.forEach((story) => {
+      grouped[story.status].push(story);
     });
     return grouped;
-  }, [filteredCards]);
+  }, [filteredStories]);
 
-  const handleDragStart = (e: React.DragEvent, card: KanbanCard) => {
-    setDraggedCard(card);
+  const handleDragStart = (e: React.DragEvent, story: KanbanStory) => {
+    setDraggedStory(story);
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", card.id);
+    e.dataTransfer.setData("text/plain", story.id);
   };
 
   const handleDragEnd = () => {
-    setDraggedCard(null);
+    setDraggedStory(null);
     setDragOverColumn(null);
   };
 
@@ -93,46 +82,47 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
 
   const handleDrop = (e: React.DragEvent, status: KanbanStatus) => {
     e.preventDefault();
-    const cardId = e.dataTransfer.getData("text/plain");
-    if (cardId && draggedCard && draggedCard.status !== status) {
-      onCardMove?.(cardId, status);
+    const storyId = e.dataTransfer.getData("text/plain");
+    if (storyId && draggedStory && draggedStory.status !== status) {
+      onStoryMove?.(storyId, status);
     }
-    setDraggedCard(null);
+    setDraggedStory(null);
     setDragOverColumn(null);
-  };
-
-  const handleCardDrop = (targetCard: KanbanCard) => {
-    if (draggedCard && draggedCard.id !== targetCard.id) {
-      // Show merge confirmation
-      setMergeConfirmation({
-        sourceCard: draggedCard,
-        targetCard,
-      });
-    }
-    setDraggedCard(null);
-    setDragOverColumn(null);
-  };
-
-  const handleMergeConfirm = () => {
-    if (mergeConfirmation) {
-      onMerge?.(mergeConfirmation.sourceCard.id, mergeConfirmation.targetCard.id);
-      setMergeConfirmation(null);
-    }
-  };
-
-  const handleMergeCancel = () => {
-    setMergeConfirmation(null);
   };
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex flex-wrap gap-4 mb-4 items-center">
+        {/* Sync button */}
+        <button
+          onClick={onSync}
+          disabled={isSyncing}
+          className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+        >
+          {isSyncing ? (
+            <>
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Syncing...
+            </>
+          ) : (
+            <>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Sync Sessions
+            </>
+          )}
+        </button>
+
         {/* Search */}
         <div className="relative">
           <input
             type="text"
-            placeholder="Search cards..."
+            placeholder="Search stories..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
@@ -161,11 +151,18 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
           ))}
         </select>
 
-        {/* Card count */}
+        {/* Story count */}
         <span className="text-sm text-gray-500">
-          {filteredCards.length} card{filteredCards.length !== 1 ? "s" : ""}
-          {(searchQuery || projectFilter !== "all") && ` (filtered from ${totalNonArchivedCards})`}
+          {filteredStories.length} stor{filteredStories.length !== 1 ? "ies" : "y"}
+          {(searchQuery || projectFilter !== "all") && ` (filtered from ${totalNonArchivedStories})`}
         </span>
+
+        {/* Empty state hint */}
+        {state.stories.length === 0 && (
+          <span className="text-sm text-amber-500">
+            Click "Sync Sessions" to import sessions
+          </span>
+        )}
       </div>
 
       {/* Columns */}
@@ -174,51 +171,18 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
           <KanbanColumn
             key={status}
             status={status}
-            cards={cardsByStatus[status]}
+            stories={storiesByStatus[status]}
             onTitleChange={onTitleChange}
-            onTitleRegenerate={handleTitleRegenerate}
+            onPRLinkChange={onPRLinkChange}
             onArchive={onArchive}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             onDragOver={() => handleDragOver(status)}
             onDrop={handleDrop}
-            isDragOver={dragOverColumn === status && draggedCard?.status !== status}
-            onCardDrop={handleCardDrop}
-            dragTargetId={draggedCard ? undefined : undefined}
-            regeneratingCardId={regeneratingCardId}
+            isDragOver={dragOverColumn === status && draggedStory?.status !== status}
           />
         ))}
       </div>
-
-      {/* Merge Confirmation Modal */}
-      {mergeConfirmation && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-            <h2 className="text-lg font-semibold text-gray-100 mb-4">Merge Cards?</h2>
-            <p className="text-gray-300 mb-4">
-              Merge "<span className="font-medium">{mergeConfirmation.sourceCard.title}</span>" into "
-              <span className="font-medium">{mergeConfirmation.targetCard.title}</span>"?
-            </p>
-            <p className="text-sm text-gray-400 mb-6">
-              The target card will contain sessions from both cards. The source card will be deleted.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={handleMergeCancel}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleMergeConfirm}
-                className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-500 transition-colors"
-              >
-                Merge
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

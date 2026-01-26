@@ -1,5 +1,6 @@
 /**
  * Server-side utilities for kanban board state management
+ * Story-based model: one story per project+branch, multiple sessions per story
  */
 
 import { homedir, tmpdir } from "node:os";
@@ -8,7 +9,7 @@ import * as fs from "node:fs/promises";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
-import type { KanbanState, KanbanCard, KanbanStatus, CreateCardInput } from "~/types/kanban";
+import type { KanbanState, KanbanStory, KanbanStatus, StorySession } from "~/types/kanban";
 import { createEmptyKanbanState } from "~/types/kanban";
 import { getSessionPreview } from "~/sessions.server";
 import { getProjects } from "~/projects.server";
@@ -16,12 +17,12 @@ import { resolveSessionFile } from "~/utils/path-safety.server";
 
 const execAsync = promisify(exec);
 
-/** Path to kanban state file (active cards) */
+/** Path to kanban state file (active stories) */
 function kanbanStatePath(): string {
   return path.join(homedir(), ".claude", "cc-viz", "kanban.json");
 }
 
-/** Path to kanban archive file (archived cards) */
+/** Path to kanban archive file (archived stories) */
 function kanbanArchivePath(): string {
   return path.join(homedir(), ".claude", "cc-viz", "kanban-archive.json");
 }
@@ -62,7 +63,7 @@ export async function isHaikuSession(project: string, sessionId: string): Promis
 
 /**
  * Extract first/last user and assistant messages from a session file
- * Returns content suitable for AI title generation
+ * Returns content suitable for AI name generation
  */
 export async function extractSessionContent(project: string, sessionId: string): Promise<string | null> {
   const { file } = resolveSessionFile(project, sessionId);
@@ -139,13 +140,11 @@ export async function extractSessionContent(project: string, sessionId: string):
 }
 
 /**
- * Generate AI title using Claude CLI with haiku model
- * @param contentFilePath Path to temp file with session content
- * @returns Generated title or null on failure
+ * Generate AI session name using Claude CLI with haiku model
  */
-export async function generateAITitle(contentFilePath: string): Promise<string | null> {
+async function generateAISessionName(contentFilePath: string): Promise<string | null> {
   const systemPrompt = "Output only the requested text. No explanations, questions, or formatting.";
-  const prompt = "Generate a concise 3-7 word title for this conversation. Output ONLY the title.";
+  const prompt = "Generate a 3-5 word description of this session's work. Output ONLY the description.";
 
   try {
     const { stdout } = await execAsync(
@@ -153,14 +152,14 @@ export async function generateAITitle(contentFilePath: string): Promise<string |
       { timeout: 30000 }
     );
 
-    const title = stdout.trim();
-    // Validate output - should be a reasonable title
-    if (title && title.length > 0 && title.length < 100 && !title.includes("\n")) {
-      return title;
+    const name = stdout.trim();
+    // Validate output - should be a reasonable name
+    if (name && name.length > 0 && name.length < 60 && !name.includes("\n")) {
+      return name;
     }
     return null;
   } catch (error) {
-    console.error("AI title generation failed:", error);
+    console.error("AI session name generation failed:", error);
     return null;
   } finally {
     // Clean up temp file
@@ -173,126 +172,126 @@ export async function generateAITitle(contentFilePath: string): Promise<string |
 }
 
 /**
+ * Generate a name for a session using AI
+ */
+export async function generateSessionName(project: string, sessionId: string): Promise<string> {
+  try {
+    const sessionContent = await extractSessionContent(project, sessionId);
+    if (sessionContent) {
+      const tempFile = path.join(tmpdir(), `session-name-${nanoid(8)}.txt`);
+      await fs.writeFile(tempFile, sessionContent, "utf8");
+
+      const aiName = await generateAISessionName(tempFile);
+      if (aiName) {
+        return aiName;
+      }
+    }
+  } catch (error) {
+    console.error("Session name generation failed:", error);
+  }
+
+  // Fallback to session ID prefix
+  return `Session ${sessionId.slice(0, 8)}`;
+}
+
+/**
+ * Detect PR link for a branch using GitHub CLI
+ */
+export async function detectPRLink(projectPath: string, branch: string): Promise<string | null> {
+  try {
+    // Decode project path (stored as URL-encoded)
+    const decodedPath = projectPath.replace(/-/g, "/");
+    const fullPath = decodedPath.startsWith("/") ? decodedPath : `/${decodedPath}`;
+
+    const { stdout } = await execAsync(
+      `gh pr list --head "${branch}" --json url --limit 1`,
+      { cwd: fullPath, timeout: 10000 }
+    );
+
+    const prs = JSON.parse(stdout);
+    return prs[0]?.url ?? null;
+  } catch {
+    // PR detection failed (not a git repo, no gh CLI, no PRs, etc.)
+    return null;
+  }
+}
+
+/**
  * Read kanban state from disk
- * Merges active cards from kanban.json and archived cards from kanban-archive.json
- * Returns empty state if files don't exist
+ * Returns empty state if version !== 2 (clears old data)
  */
 export async function getKanbanState(): Promise<KanbanState> {
   let activeState: KanbanState = createEmptyKanbanState();
-  let archivedCards: KanbanCard[] = [];
+  let archivedStories: KanbanStory[] = [];
 
   // Read active state
   try {
     const content = await fs.readFile(kanbanStatePath(), "utf8");
-    const state = JSON.parse(content) as KanbanState;
-    if (state.version === 1 && Array.isArray(state.cards)) {
-      activeState = state;
+    const state = JSON.parse(content);
+    // Only accept version 2 (story-based model)
+    if (state.version === 2 && Array.isArray(state.stories)) {
+      activeState = state as KanbanState;
     }
+    // Version 1 or invalid: return empty state (clears old data)
   } catch {
     // File doesn't exist or is invalid
   }
 
-  // Read archived cards
+  // Read archived stories
   try {
     const content = await fs.readFile(kanbanArchivePath(), "utf8");
-    const archiveState = JSON.parse(content) as { cards: KanbanCard[] };
-    if (Array.isArray(archiveState.cards)) {
-      archivedCards = archiveState.cards;
+    const archiveState = JSON.parse(content);
+    // Check for version 2 archive format
+    if (archiveState.version === 2 && Array.isArray(archiveState.stories)) {
+      archivedStories = archiveState.stories;
     }
   } catch {
     // File doesn't exist or is invalid
   }
 
-  // Merge cards (active + archived)
+  // Merge stories (active + archived)
   return {
     ...activeState,
-    cards: [...activeState.cards, ...archivedCards],
+    stories: [...activeState.stories, ...archivedStories],
   };
 }
 
 /**
  * Save kanban state to disk
- * Splits cards: archived → kanban-archive.json, others → kanban.json
+ * Splits stories: archived → kanban-archive.json, others → kanban.json
  */
 export async function saveKanbanState(state: KanbanState): Promise<void> {
   await ensureDir();
   const now = new Date().toISOString();
 
-  // Split cards by archive status
-  const activeCards = state.cards.filter(c => c.status !== "archive");
-  const archivedCards = state.cards.filter(c => c.status === "archive");
+  // Split stories by archive status
+  const activeStories = state.stories.filter(s => s.status !== "archive");
+  const archivedStories = state.stories.filter(s => s.status === "archive");
 
   // Save active state (with metadata)
   const activeState: KanbanState = {
     ...state,
-    cards: activeCards,
+    stories: activeStories,
     lastSyncedAt: now,
   };
   await fs.writeFile(kanbanStatePath(), JSON.stringify(activeState, null, 2), "utf8");
 
-  // Save archived cards (minimal structure)
+  // Save archived stories (minimal structure)
   const archiveState = {
-    cards: archivedCards,
+    version: 2,
+    stories: archivedStories,
     lastSyncedAt: now,
   };
   await fs.writeFile(kanbanArchivePath(), JSON.stringify(archiveState, null, 2), "utf8");
 }
 
 /**
- * Generate a title for a card from session data
- * Tries AI generation first, then falls back to git branch / last message
+ * Get all session IDs across all projects with git branch info
+ * @param limit Max sessions to return (default 20, most recent first)
  */
-export async function generateTitle(project: string, sessionId: string, useAI = true): Promise<{ title: string; version?: number }> {
-  // Try AI-powered title generation first
-  if (useAI) {
-    try {
-      const sessionContent = await extractSessionContent(project, sessionId);
-      if (sessionContent) {
-        // Write to temp file for claude CLI
-        const tempFile = path.join(tmpdir(), `kanban-title-${nanoid(8)}.txt`);
-        await fs.writeFile(tempFile, sessionContent, "utf8");
-
-        const aiTitle = await generateAITitle(tempFile);
-        if (aiTitle) {
-          return { title: aiTitle, version: 1 };
-        }
-      }
-    } catch (error) {
-      console.error("AI title generation failed, falling back:", error);
-    }
-  }
-
-  // Fallback to traditional title generation
-  try {
-    const preview = await getSessionPreview(project, sessionId);
-    if (preview) {
-      // Use git branch if available
-      if (preview.gitBranch) {
-        // Clean up branch name for display
-        const branch = preview.gitBranch
-          .replace(/^(feature|fix|bug|chore|refactor)\//, "")
-          .replace(/-/g, " ")
-          .replace(/_/g, " ");
-        return { title: branch.charAt(0).toUpperCase() + branch.slice(1) };
-      }
-      // Use last message truncated
-      if (preview.lastMessage && preview.lastMessage !== "Session in progress") {
-        return { title: preview.lastMessage.slice(0, 50) + (preview.lastMessage.length > 50 ? "..." : "") };
-      }
-    }
-  } catch {
-    // Ignore errors, fall back to session ID
-  }
-  // Fallback to session ID
-  return { title: `Session ${sessionId.slice(0, 8)}` };
-}
-
-/**
- * Get all session IDs across all projects
- */
-async function getAllSessions(): Promise<Array<{ project: string; sessionId: string; timestamp: string; gitBranch?: string }>> {
+async function getAllSessions(limit: number = 20): Promise<Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }>> {
   const { projects } = await getProjects();
-  const sessions: Array<{ project: string; sessionId: string; timestamp: string; gitBranch?: string }> = [];
+  const sessions: Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }> = [];
 
   for (const proj of projects) {
     const projectDir = path.join(homedir(), ".claude", "projects", proj.name);
@@ -304,10 +303,13 @@ async function getAllSessions(): Promise<Array<{ project: string; sessionId: str
         const filePath = path.join(projectDir, entry.name);
         try {
           const stats = await fs.stat(filePath);
+          // Get git branch from session preview
+          const preview = await getSessionPreview(proj.name, sessionId);
           sessions.push({
             project: proj.name,
             sessionId,
             timestamp: stats.mtime.toISOString(),
+            gitBranch: preview?.gitBranch ?? null,
           });
         } catch {
           // Skip files we can't stat
@@ -318,195 +320,219 @@ async function getAllSessions(): Promise<Array<{ project: string; sessionId: str
     }
   }
 
-  return sessions;
+  // Sort by timestamp descending (most recent first) and limit
+  sessions.sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  return sessions.slice(0, limit);
 }
 
 /**
- * Sync sessions to kanban cards
- * - If no state exists (initial import): all sessions → archive
- * - If state exists: new sessions → in-progress
+ * Get next order number for a status column
  */
-export async function syncSessionsToCards(): Promise<KanbanState> {
-  const existingState = await getKanbanState();
-  const isInitialImport = existingState.importedSessionIds.length === 0 && existingState.cards.length === 0;
+function getNextOrder(stories: KanbanStory[], status: KanbanStatus): number {
+  const columnStories = stories.filter(s => s.status === status);
+  if (columnStories.length === 0) return 0;
+  return Math.max(...columnStories.map(s => s.order)) + 1;
+}
 
+/**
+ * Sync sessions to kanban stories
+ * Groups sessions by project+branch, creates stories as needed
+ * Returns count of new stories and sessions added
+ */
+export async function syncSessionsToStories(): Promise<{ newStories: number; newSessions: number }> {
+  const state = await getKanbanState();
   const allSessions = await getAllSessions();
-  const importedSet = new Set(existingState.importedSessionIds);
 
-  // Find new sessions
-  const newSessions = allSessions.filter(s => !importedSet.has(`${s.project}:${s.sessionId}`));
-
-  if (newSessions.length === 0) {
-    return existingState;
+  console.log(`[kanban] Found ${allSessions.length} sessions to process`);
+  if (allSessions.length > 0) {
+    console.log(`[kanban] First session:`, allSessions[0]);
   }
 
-  // Default status for new cards
-  const defaultStatus: KanbanStatus = isInitialImport ? "archive" : "in-progress";
+  let newStoryCount = 0;
+  let newSessionCount = 0;
+  let skippedHaiku = 0;
 
-  // Get current max order for the target column
-  const existingOrders = existingState.cards
-    .filter(c => c.status === defaultStatus)
-    .map(c => c.order);
-  let nextOrder = existingOrders.length > 0 ? Math.max(...existingOrders) + 1 : 0;
+  // Build lookup: "project:branch" -> story (branch is "NO_BRANCH" for null)
+  const storyLookup = new Map<string, KanbanStory>();
+  for (const story of state.stories) {
+    const key = `${story.project}:${story.branch ?? "NO_BRANCH"}`;
+    storyLookup.set(key, story);
+  }
 
-  // Create cards for new sessions with fallback titles (no AI generation)
-  // AI title generation is available via manual migration script: pnpm migrate:titles
-  // Skip haiku sessions - they don't get cards
-  const newCards: KanbanCard[] = [];
-  for (const session of newSessions) {
+  // Build set of existing session IDs
+  const existingSessionIds = new Set<string>();
+  for (const story of state.stories) {
+    for (const session of story.sessions) {
+      existingSessionIds.add(`${story.project}:${session.id}`);
+    }
+  }
+
+  // Process each session from disk
+  for (const session of allSessions) {
+    const sessionKey = `${session.project}:${session.sessionId}`;
+    if (existingSessionIds.has(sessionKey)) continue; // Already tracked
+
     // Skip haiku sessions
     if (await isHaikuSession(session.project, session.sessionId)) {
+      skippedHaiku++;
       continue;
     }
 
-    const { title } = await generateTitle(session.project, session.sessionId, false);
-    const preview = await getSessionPreview(session.project, session.sessionId);
+    const storyKey = `${session.project}:${session.gitBranch ?? "NO_BRANCH"}`;
+    let story = storyLookup.get(storyKey);
 
-    newCards.push({
-      id: nanoid(10),
-      title,
-      sessionIds: [session.sessionId],
-      project: session.project,
-      status: defaultStatus,
-      order: nextOrder++,
-      gitBranch: preview?.gitBranch,
-      createdAt: session.timestamp,
-      updatedAt: new Date().toISOString(),
+    if (!story) {
+      // Create new story
+      const prLink = session.gitBranch
+        ? await detectPRLink(session.project, session.gitBranch)
+        : null;
+
+      story = {
+        id: nanoid(10),
+        title: session.gitBranch ?? "No Branch",
+        project: session.project,
+        branch: session.gitBranch,
+        prLink,
+        status: "in-progress" as KanbanStatus,
+        order: getNextOrder(state.stories, "in-progress"),
+        sessions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      storyLookup.set(storyKey, story);
+      state.stories.push(story);
+      newStoryCount++;
+    }
+
+    // Generate AI name for session
+    const sessionName = await generateSessionName(session.project, session.sessionId);
+
+    // Build session link
+    const link = `/${encodeURIComponent(session.project)}/sessions/${encodeURIComponent(session.sessionId)}`;
+
+    story.sessions.push({
+      id: session.sessionId,
+      name: sessionName,
+      timestamp: session.timestamp,
+      link,
     });
+    story.updatedAt = new Date().toISOString();
+    newSessionCount++;
   }
 
-  // Update state
-  const updatedState: KanbanState = {
-    ...existingState,
-    cards: [...existingState.cards, ...newCards],
-    importedSessionIds: [
-      ...existingState.importedSessionIds,
-      ...newSessions.map(s => `${s.project}:${s.sessionId}`),
-    ],
-    lastSyncedAt: new Date().toISOString(),
-  };
+  // Sort sessions within each story by timestamp (newest first)
+  for (const story of state.stories) {
+    story.sessions.sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
 
-  await saveKanbanState(updatedState);
+  await saveKanbanState(state);
 
-  console.log(`[kanban] Sync complete: ${newCards.length} new cards added`);
+  console.log(`[kanban] Sync complete: ${newStoryCount} new stories, ${newSessionCount} new sessions, ${skippedHaiku} skipped (haiku)`);
 
-  return updatedState;
+  return { newStories: newStoryCount, newSessions: newSessionCount };
 }
 
 /**
- * Create a card from input
+ * Update a story's status and reorder within column
  */
-export function createCard(input: CreateCardInput, state: KanbanState): KanbanCard {
-  // Get max order for in-progress column (default for new cards)
-  const inProgressCards = state.cards.filter(c => c.status === "in-progress");
-  const maxOrder = inProgressCards.length > 0
-    ? Math.max(...inProgressCards.map(c => c.order))
-    : -1;
-
-  return {
-    id: nanoid(10),
-    title: input.title || `Session ${input.sessionId.slice(0, 8)}`,
-    sessionIds: [input.sessionId],
-    project: input.project,
-    status: "in-progress",
-    order: maxOrder + 1,
-    gitBranch: input.gitBranch,
-    createdAt: input.timestamp || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-/**
- * Update a card's status and reorder within column
- */
-export function updateCardStatus(
+export function updateStoryStatus(
   state: KanbanState,
-  cardId: string,
+  storyId: string,
   newStatus: KanbanStatus,
   newOrder?: number
 ): KanbanState {
-  const cardIndex = state.cards.findIndex(c => c.id === cardId);
-  if (cardIndex === -1) return state;
+  const storyIndex = state.stories.findIndex(s => s.id === storyId);
+  if (storyIndex === -1) return state;
 
-  const card = state.cards[cardIndex];
-  const oldStatus = card.status;
+  const story = state.stories[storyIndex];
+  const oldStatus = story.status;
 
   // If status changed, need to reorder both columns
   if (oldStatus !== newStatus) {
-    // Remove from old column - decrement orders of cards that were after this one
-    const updatedCards = state.cards.map(c => {
-      if (c.status === oldStatus && c.order > card.order) {
-        return { ...c, order: c.order - 1 };
+    // Remove from old column - decrement orders of stories that were after this one
+    const updatedStories = state.stories.map(s => {
+      if (s.status === oldStatus && s.order > story.order) {
+        return { ...s, order: s.order - 1 };
       }
-      return c;
+      return s;
     });
 
     // Add to new column at specified position or end
-    const newColumnCards = updatedCards.filter(c => c.status === newStatus);
-    const targetOrder = newOrder ?? (newColumnCards.length > 0 ? Math.max(...newColumnCards.map(c => c.order)) + 1 : 0);
+    const newColumnStories = updatedStories.filter(s => s.status === newStatus);
+    const targetOrder = newOrder ?? (newColumnStories.length > 0 ? Math.max(...newColumnStories.map(s => s.order)) + 1 : 0);
 
-    // Shift cards in new column to make room
-    const finalCards = updatedCards.map(c => {
-      if (c.id === cardId) {
-        return { ...c, status: newStatus, order: targetOrder, updatedAt: new Date().toISOString() };
+    // Shift stories in new column to make room
+    const finalStories = updatedStories.map(s => {
+      if (s.id === storyId) {
+        return { ...s, status: newStatus, order: targetOrder, updatedAt: new Date().toISOString() };
       }
-      if (c.status === newStatus && c.order >= targetOrder) {
-        return { ...c, order: c.order + 1 };
+      if (s.status === newStatus && s.order >= targetOrder) {
+        return { ...s, order: s.order + 1 };
       }
-      return c;
+      return s;
     });
 
-    return { ...state, cards: finalCards };
+    return { ...state, stories: finalStories };
   }
 
   // Same column, just reorder
-  if (newOrder !== undefined && newOrder !== card.order) {
-    const columnCards = state.cards.filter(c => c.status === oldStatus && c.id !== cardId);
-    columnCards.splice(newOrder, 0, { ...card, order: newOrder, updatedAt: new Date().toISOString() });
+  if (newOrder !== undefined && newOrder !== story.order) {
+    const columnStories = state.stories.filter(s => s.status === oldStatus && s.id !== storyId);
+    columnStories.splice(newOrder, 0, { ...story, order: newOrder, updatedAt: new Date().toISOString() });
 
-    // Renumber all cards in column
-    const reorderedCards = columnCards.map((c, i) => ({ ...c, order: i }));
-    const otherCards = state.cards.filter(c => c.status !== oldStatus);
+    // Renumber all stories in column
+    const reorderedStories = columnStories.map((s, i) => ({ ...s, order: i }));
+    const otherStories = state.stories.filter(s => s.status !== oldStatus);
 
-    return { ...state, cards: [...otherCards, ...reorderedCards] };
+    return { ...state, stories: [...otherStories, ...reorderedStories] };
   }
 
   return state;
 }
 
 /**
- * Merge two cards - combine sessionIds, delete source
+ * Update a story's PR link
  */
-export function mergeCards(
+export function updateStoryPRLink(
   state: KanbanState,
-  sourceId: string,
-  targetId: string
+  storyId: string,
+  prLink: string | null
 ): KanbanState {
-  const sourceCard = state.cards.find(c => c.id === sourceId);
-  const targetCard = state.cards.find(c => c.id === targetId);
+  const storyIndex = state.stories.findIndex(s => s.id === storyId);
+  if (storyIndex === -1) return state;
 
-  if (!sourceCard || !targetCard) return state;
+  const updatedStories = [...state.stories];
+  updatedStories[storyIndex] = {
+    ...updatedStories[storyIndex],
+    prLink,
+    updatedAt: new Date().toISOString(),
+  };
 
-  // Combine sessionIds
-  const mergedSessionIds = [...targetCard.sessionIds, ...sourceCard.sessionIds];
+  return { ...state, stories: updatedStories };
+}
 
-  // Update target card
-  const updatedCards = state.cards
-    .filter(c => c.id !== sourceId) // Remove source
-    .map(c => {
-      if (c.id === targetId) {
-        return {
-          ...c,
-          sessionIds: mergedSessionIds,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      // Decrement order for cards after source in same column
-      if (c.status === sourceCard.status && c.order > sourceCard.order) {
-        return { ...c, order: c.order - 1 };
-      }
-      return c;
-    });
+/**
+ * Update a story's title
+ */
+export function updateStoryTitle(
+  state: KanbanState,
+  storyId: string,
+  title: string
+): KanbanState {
+  const storyIndex = state.stories.findIndex(s => s.id === storyId);
+  if (storyIndex === -1) return state;
 
-  return { ...state, cards: updatedCards };
+  const updatedStories = [...state.stories];
+  updatedStories[storyIndex] = {
+    ...updatedStories[storyIndex],
+    title,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return { ...state, stories: updatedStories };
 }

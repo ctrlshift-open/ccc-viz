@@ -1,5 +1,5 @@
 /**
- * Kanban board types for organizing Claude Code sessions
+ * Kanban board types for organizing Claude Code sessions by story (project + branch)
  */
 
 /** Kanban column statuses */
@@ -31,66 +31,63 @@ export const KANBAN_LABELS: Record<KanbanStatus, string> = {
   complete: "Complete",
 };
 
-/** A kanban card representing one or more sessions */
-export type KanbanCard = {
+/** A session within a story */
+export type StorySession = {
+  /** Session ID (filename without .jsonl) */
   id: string;
+  /** AI-generated name summarizing the session */
+  name: string;
+  /** Session creation timestamp */
+  timestamp: string;
+  /** URL to session browser view */
+  link: string;
+};
+
+/** A kanban story = project + branch combination */
+export type KanbanStory = {
+  id: string;
+  /** Title - defaults to branch name, user-editable */
   title: string;
-  /** Session IDs - can have multiple if merged */
-  sessionIds: string[];
   /** Project name from ~/.claude/projects */
   project: string;
+  /** Git branch name, null for "No Branch" story */
+  branch: string | null;
+  /** GitHub PR URL (auto-detected or manual) */
+  prLink: string | null;
   status: KanbanStatus;
   /** Position within column for ordering */
   order: number;
-  /** Git branch from session (first session if merged) */
-  gitBranch?: string;
-  /** Original timestamp from session */
+  /** Sessions belonging to this story */
+  sessions: StorySession[];
+  /** Story creation timestamp */
   createdAt: string;
   /** Last modification time */
   updatedAt: string;
-  /** Title generation version - used to track AI-generated titles */
-  version?: number;
 };
 
 /** Full kanban state stored in ~/.claude/cc-viz/kanban.json */
 export type KanbanState = {
-  version: 1;
-  cards: KanbanCard[];
-  /** Track which sessions we've already imported */
-  importedSessionIds: string[];
+  /** Version 2 = story-based model */
+  version: 2;
+  stories: KanbanStory[];
   /** Last sync timestamp */
   lastSyncedAt: string;
 };
 
-/** Input for creating a new card */
-export type CreateCardInput = {
-  sessionId: string;
-  project: string;
-  title?: string;
-  gitBranch?: string;
-  timestamp?: string;
-};
-
-/** Input for updating a card */
-export type UpdateCardInput = {
+/** Input for updating a story */
+export type UpdateStoryInput = {
   id: string;
   title?: string;
   status?: KanbanStatus;
   order?: number;
-};
-
-/** Input for merging cards */
-export type MergeCardsInput = {
-  sourceId: string;
-  targetId: string;
+  prLink?: string | null;
 };
 
 /** Empty initial state factory */
 export function createEmptyKanbanState(): KanbanState {
   return {
-    version: 1,
-    cards: [],
-    importedSessionIds: [],
+    version: 2,
+    stories: [],
     lastSyncedAt: new Date().toISOString(),
   };
 }
