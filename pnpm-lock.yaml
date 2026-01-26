@@ -20,15 +20,12 @@ importers:
       ansi_up:
         specifier: ^6.0.6
         version: 6.0.6
-      better-sqlite3:
-        specifier: ^12.6.2
-        version: 12.6.2
       ccusage:
         specifier: ^16.2.3
         version: 16.2.3
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)
+        version: 0.45.1(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
       isbot:
         specifier: ^5.1.27
         version: 5.1.30
@@ -72,12 +69,18 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.2
         version: 19.1.9(@types/react@19.1.12)
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
       drizzle-kit:
         specifier: ^0.31.8
         version: 0.31.8
       playwright:
         specifier: ^1.56.1
         version: 1.56.1
+      prebuild-install:
+        specifier: ^7.1.3
+        version: 7.1.3
       tailwindcss:
         specifier: ^4.1.4
         version: 4.1.12
@@ -1094,9 +1097,8 @@ packages:
     resolution: {integrity: sha512-NF+epuEdnUYVlGuhaxbbq+dvJttwLnGY+YixlXlME5KpQ5W3CnXA5cVTneY3SPbPDRkcjMbifrwmFYcClgOZeg==}
     engines: {node: '>= 0.8'}
 
-  better-sqlite3@12.6.2:
-    resolution: {integrity: sha512-8VYKM3MjCa9WcaSAI3hzwhmyHVlH8tiGFwf0RlTsZPWJ1I5MkzjiudCo4KC4DxOaL/53A5B1sI/IbldNFDbsKA==}
-    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
+  better-sqlite3@11.10.0:
+    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -3448,7 +3450,7 @@ snapshots:
     dependencies:
       safe-buffer: 5.1.2
 
-  better-sqlite3@12.6.2:
+  better-sqlite3@11.10.0:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3
@@ -3633,10 +3635,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.45.1(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2):
+  drizzle-orm@0.45.1(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0):
     optionalDependencies:
       '@types/better-sqlite3': 7.6.13
-      better-sqlite3: 12.6.2
+      better-sqlite3: 11.10.0
 
   dunder-proto@1.0.1:
     dependencies:

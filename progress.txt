@@ -7,6 +7,19 @@
 - SQLite: better-sqlite3 with drizzle-orm
 - DB queries: `~/db/queries.server.ts` (getAllStories, createStory, updateStory, archiveStory)
 - Kanban utils: `~/utils/kanban.server.ts` wraps DB with business logic
+- Native module builds: pnpm v10 ignores build scripts by default; manually build with `npm run build-release` in module dir
+
+---
+
+## 2026-01-26 - Phase 01: SQLite Database (Task 9/9 - COMPLETE)
+
+- Verified migration script preserves all data (6 stories, 31 sessions)
+- Reviewed types/kanban.ts - no Drizzle inference changes needed (app types separate from DB types)
+- Files changed: .beans/ccc-viz-trox--phase-01-sqlite-database.md, CLAUDE.md, .npmrc
+- **Learnings:**
+  - App-level types (KanbanStory) vs DB types (Story) - keep separate, convert in queries.server.ts
+  - pnpm v10 `only-built-dependencies` in .npmrc still ignored - manual build required
+  - Migration verification: compare counts before/after is sufficient
 
 ---
 

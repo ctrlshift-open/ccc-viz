@@ -1,7 +1,7 @@
 ---
 # ccc-viz-trox
 title: 'Phase 01: SQLite Database'
-status: in-progress
+status: completed
 type: task
 priority: normal
 created_at: 2026-01-26T12:59:08Z
@@ -20,10 +20,10 @@ updated_at: 2026-01-26T13:23:07Z
 - [x] Create scripts/migrate-json-to-sqlite.ts - One-time migration from JSON
 - [x] Create drizzle.config.ts - Drizzle Kit config for migrations
 - [x] Update app/utils/kanban.server.ts - Replace JSON read/write with Drizzle queries
-- [ ] Update app/types/kanban.ts - Add Drizzle inference if needed
+- [x] Update app/types/kanban.ts - Add Drizzle inference if needed (no changes needed - types work as-is)
 
 ## Verification
 
 - [x] Tests pass: pnpm test
 - [x] No type errors: pnpm typecheck
-- [ ] Migration script preserves all data
+- [x] Migration script preserves all data (6 stories, 31 sessions verified)

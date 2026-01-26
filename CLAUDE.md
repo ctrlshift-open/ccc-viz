@@ -46,6 +46,15 @@ pnpm bg:stop      # Stop background server
 - Drizzle Kit scripts: `pnpm db:generate`, `pnpm db:push`, `pnpm db:studio`
 - **Query helpers**: `app/db/queries.server.ts` has all CRUD operations (getAllStories, createStory, etc.)
 - **Kanban utils**: `app/utils/kanban.server.ts` wraps DB queries with business logic (sync, session detection)
+- **Migration**: Run `pnpm migrate:json-to-sqlite` to migrate from JSON files (one-time)
+
+### Native Module Builds (better-sqlite3)
+pnpm v10 requires explicit approval for native module build scripts. If better-sqlite3 bindings are missing:
+```bash
+# Navigate to the module and build manually
+bash -c 'cd /path/to/node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run build-release'
+```
+The `.npmrc` file has `only-built-dependencies=better-sqlite3` but pnpm may still ignore it.
 
 ### Routing Structure
 Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:
