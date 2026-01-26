@@ -20,10 +20,10 @@ Add a slide-in detail panel for kanban story cards. Panel shows full session inf
   1. Clicking expand button on story card opens panel from right side
   2. Panel closes via X button or clicking overlay
   3. Panel is scrollable when content exceeds viewport height
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 01-01: Panel component with slide animation and close behaviors
+- [ ] 01-01-PLAN.md — Create panel shell with slide animation and wire to card/board
 
 ### Phase 2: Content Display
 **Goal**: User can see all story information and navigate to sessions
