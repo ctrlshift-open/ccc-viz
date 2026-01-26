@@ -20,6 +20,7 @@
     "bg:restart": "pnpm run bg:stop && sleep 2 && pnpm run bg:dev",
     "bg:clean": "rm -rf tmp/",
     "migrate:titles": "npx tsx scripts/migrate-titles.ts",
+    "migrate:json-to-sqlite": "npx tsx scripts/migrate-json-to-sqlite.ts",
     "prepack": "react-router build"
   },
   "bin": {
