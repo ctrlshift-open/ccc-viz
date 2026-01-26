@@ -10,28 +10,22 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import type { KanbanState, KanbanStory, KanbanStatus, StorySession } from "~/types/kanban";
-import { createEmptyKanbanState } from "~/types/kanban";
 import { getSessionPreview } from "~/sessions.server";
 import { getProjects } from "~/projects.server";
 import { resolveSessionFile } from "~/utils/path-safety.server";
+import {
+  getKanbanStateFromDb,
+  getStoryByProjectBranch,
+  createStory,
+  createSession,
+  sessionExists,
+  updateStory,
+  updateStoryStatusAndOrder,
+  getNextOrder,
+  setLastSyncedAt,
+} from "~/db/queries.server";
 
 const execAsync = promisify(exec);
-
-/** Path to kanban state file (active stories) */
-function kanbanStatePath(): string {
-  return path.join(homedir(), ".claude", "cc-viz", "kanban.json");
-}
-
-/** Path to kanban archive file (archived stories) */
-function kanbanArchivePath(): string {
-  return path.join(homedir(), ".claude", "cc-viz", "kanban-archive.json");
-}
-
-/** Ensure parent directory exists */
-async function ensureDir(): Promise<void> {
-  const dir = path.dirname(kanbanStatePath());
-  await fs.mkdir(dir, { recursive: true });
-}
 
 /**
  * Check if a session was started with haiku model
@@ -217,72 +211,19 @@ export async function detectPRLink(projectPath: string, branch: string): Promise
 }
 
 /**
- * Read kanban state from disk
- * Returns empty state if version !== 2 (clears old data)
+ * Read kanban state from SQLite database
+ * @returns KanbanState with all active and archived stories
  */
-export async function getKanbanState(): Promise<KanbanState> {
-  let activeState: KanbanState = createEmptyKanbanState();
-  let archivedStories: KanbanStory[] = [];
-
-  // Read active state
-  try {
-    const content = await fs.readFile(kanbanStatePath(), "utf8");
-    const state = JSON.parse(content);
-    // Only accept version 2 (story-based model)
-    if (state.version === 2 && Array.isArray(state.stories)) {
-      activeState = state as KanbanState;
-    }
-    // Version 1 or invalid: return empty state (clears old data)
-  } catch {
-    // File doesn't exist or is invalid
-  }
-
-  // Read archived stories
-  try {
-    const content = await fs.readFile(kanbanArchivePath(), "utf8");
-    const archiveState = JSON.parse(content);
-    // Check for version 2 archive format
-    if (archiveState.version === 2 && Array.isArray(archiveState.stories)) {
-      archivedStories = archiveState.stories;
-    }
-  } catch {
-    // File doesn't exist or is invalid
-  }
-
-  // Merge stories (active + archived)
-  return {
-    ...activeState,
-    stories: [...activeState.stories, ...archivedStories],
-  };
+export function getKanbanState(): KanbanState {
+  return getKanbanStateFromDb();
 }
 
 /**
- * Save kanban state to disk
- * Splits stories: archived → kanban-archive.json, others → kanban.json
+ * Update last sync timestamp in database
  */
-export async function saveKanbanState(state: KanbanState): Promise<void> {
-  await ensureDir();
+export function saveKanbanSyncTime(): void {
   const now = new Date().toISOString();
-
-  // Split stories by archive status
-  const activeStories = state.stories.filter(s => s.status !== "archive");
-  const archivedStories = state.stories.filter(s => s.status === "archive");
-
-  // Save active state (with metadata)
-  const activeState: KanbanState = {
-    ...state,
-    stories: activeStories,
-    lastSyncedAt: now,
-  };
-  await fs.writeFile(kanbanStatePath(), JSON.stringify(activeState, null, 2), "utf8");
-
-  // Save archived stories (minimal structure)
-  const archiveState = {
-    version: 2,
-    stories: archivedStories,
-    lastSyncedAt: now,
-  };
-  await fs.writeFile(kanbanArchivePath(), JSON.stringify(archiveState, null, 2), "utf8");
+  setLastSyncedAt(now);
 }
 
 /**
@@ -291,7 +232,7 @@ export async function saveKanbanState(state: KanbanState): Promise<void> {
  */
 async function getAllSessions(limit: number = 20): Promise<Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }>> {
   const { projects } = await getProjects();
-  const sessions: Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }> = [];
+  const allSessions: Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }> = [];
 
   for (const proj of projects) {
     const projectDir = path.join(homedir(), ".claude", "projects", proj.name);
@@ -305,7 +246,7 @@ async function getAllSessions(limit: number = 20): Promise<Array<{ project: stri
           const stats = await fs.stat(filePath);
           // Get git branch from session preview
           const preview = await getSessionPreview(proj.name, sessionId);
-          sessions.push({
+          allSessions.push({
             project: proj.name,
             sessionId,
             timestamp: stats.mtime.toISOString(),
@@ -321,20 +262,11 @@ async function getAllSessions(limit: number = 20): Promise<Array<{ project: stri
   }
 
   // Sort by timestamp descending (most recent first) and limit
-  sessions.sort((a, b) =>
+  allSessions.sort((a, b) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
-  return sessions.slice(0, limit);
-}
-
-/**
- * Get next order number for a status column
- */
-function getNextOrder(stories: KanbanStory[], status: KanbanStatus): number {
-  const columnStories = stories.filter(s => s.status === status);
-  if (columnStories.length === 0) return 0;
-  return Math.max(...columnStories.map(s => s.order)) + 1;
+  return allSessions.slice(0, limit);
 }
 
 /**
@@ -343,7 +275,6 @@ function getNextOrder(stories: KanbanStory[], status: KanbanStatus): number {
  * Returns count of new stories and sessions added
  */
 export async function syncSessionsToStories(): Promise<{ newStories: number; newSessions: number }> {
-  const state = await getKanbanState();
   const allSessions = await getAllSessions();
 
   console.log(`[kanban] Found ${allSessions.length} sessions to process`);
@@ -355,25 +286,10 @@ export async function syncSessionsToStories(): Promise<{ newStories: number; new
   let newSessionCount = 0;
   let skippedHaiku = 0;
 
-  // Build lookup: "project:branch" -> story (branch is "NO_BRANCH" for null)
-  const storyLookup = new Map<string, KanbanStory>();
-  for (const story of state.stories) {
-    const key = `${story.project}:${story.branch ?? "NO_BRANCH"}`;
-    storyLookup.set(key, story);
-  }
-
-  // Build set of existing session IDs
-  const existingSessionIds = new Set<string>();
-  for (const story of state.stories) {
-    for (const session of story.sessions) {
-      existingSessionIds.add(`${story.project}:${session.id}`);
-    }
-  }
-
   // Process each session from disk
   for (const session of allSessions) {
-    const sessionKey = `${session.project}:${session.sessionId}`;
-    if (existingSessionIds.has(sessionKey)) continue; // Already tracked
+    // Check if session already exists in DB
+    if (sessionExists(session.project, session.sessionId)) continue;
 
     // Skip haiku sessions
     if (await isHaikuSession(session.project, session.sessionId)) {
@@ -381,8 +297,8 @@ export async function syncSessionsToStories(): Promise<{ newStories: number; new
       continue;
     }
 
-    const storyKey = `${session.project}:${session.gitBranch ?? "NO_BRANCH"}`;
-    let story = storyLookup.get(storyKey);
+    // Find or create story for this project+branch
+    let story = getStoryByProjectBranch(session.project, session.gitBranch);
 
     if (!story) {
       // Create new story
@@ -390,22 +306,25 @@ export async function syncSessionsToStories(): Promise<{ newStories: number; new
         ? await detectPRLink(session.project, session.gitBranch)
         : null;
 
-      story = {
+      const now = new Date().toISOString();
+      const newStory = createStory({
         id: nanoid(10),
         title: session.gitBranch ?? "No Branch",
         project: session.project,
         branch: session.gitBranch,
         prLink,
-        status: "in-progress" as KanbanStatus,
-        order: getNextOrder(state.stories, "in-progress"),
-        sessions: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      storyLookup.set(storyKey, story);
-      state.stories.push(story);
+        status: "in-progress",
+        order: getNextOrder("in-progress"),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Refetch to get the full story with sessions array
+      story = getStoryByProjectBranch(session.project, session.gitBranch);
       newStoryCount++;
     }
+
+    if (!story) continue; // Safety check
 
     // Generate AI name for session
     const sessionName = await generateSessionName(session.project, session.sessionId);
@@ -413,24 +332,22 @@ export async function syncSessionsToStories(): Promise<{ newStories: number; new
     // Build session link
     const link = `/${encodeURIComponent(session.project)}/sessions/${encodeURIComponent(session.sessionId)}`;
 
-    story.sessions.push({
+    // Create session in DB
+    createSession({
       id: session.sessionId,
+      storyId: story.id,
       name: sessionName,
       timestamp: session.timestamp,
       link,
     });
-    story.updatedAt = new Date().toISOString();
+
+    // Update story's updatedAt
+    updateStory(story.id, { updatedAt: new Date().toISOString() });
     newSessionCount++;
   }
 
-  // Sort sessions within each story by timestamp (newest first)
-  for (const story of state.stories) {
-    story.sessions.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-  }
-
-  await saveKanbanState(state);
+  // Update last sync time
+  saveKanbanSyncTime();
 
   console.log(`[kanban] Sync complete: ${newStoryCount} new stories, ${newSessionCount} new sessions, ${skippedHaiku} skipped (haiku)`);
 
@@ -439,100 +356,34 @@ export async function syncSessionsToStories(): Promise<{ newStories: number; new
 
 /**
  * Update a story's status and reorder within column
+ * Uses DB operations directly
  */
-export function updateStoryStatus(
-  state: KanbanState,
+export function updateStoryStatusDb(
   storyId: string,
   newStatus: KanbanStatus,
   newOrder?: number
-): KanbanState {
-  const storyIndex = state.stories.findIndex(s => s.id === storyId);
-  if (storyIndex === -1) return state;
-
-  const story = state.stories[storyIndex];
-  const oldStatus = story.status;
-
-  // If status changed, need to reorder both columns
-  if (oldStatus !== newStatus) {
-    // Remove from old column - decrement orders of stories that were after this one
-    const updatedStories = state.stories.map(s => {
-      if (s.status === oldStatus && s.order > story.order) {
-        return { ...s, order: s.order - 1 };
-      }
-      return s;
-    });
-
-    // Add to new column at specified position or end
-    const newColumnStories = updatedStories.filter(s => s.status === newStatus);
-    const targetOrder = newOrder ?? (newColumnStories.length > 0 ? Math.max(...newColumnStories.map(s => s.order)) + 1 : 0);
-
-    // Shift stories in new column to make room
-    const finalStories = updatedStories.map(s => {
-      if (s.id === storyId) {
-        return { ...s, status: newStatus, order: targetOrder, updatedAt: new Date().toISOString() };
-      }
-      if (s.status === newStatus && s.order >= targetOrder) {
-        return { ...s, order: s.order + 1 };
-      }
-      return s;
-    });
-
-    return { ...state, stories: finalStories };
-  }
-
-  // Same column, just reorder
-  if (newOrder !== undefined && newOrder !== story.order) {
-    const columnStories = state.stories.filter(s => s.status === oldStatus && s.id !== storyId);
-    columnStories.splice(newOrder, 0, { ...story, order: newOrder, updatedAt: new Date().toISOString() });
-
-    // Renumber all stories in column
-    const reorderedStories = columnStories.map((s, i) => ({ ...s, order: i }));
-    const otherStories = state.stories.filter(s => s.status !== oldStatus);
-
-    return { ...state, stories: [...otherStories, ...reorderedStories] };
-  }
-
-  return state;
+): void {
+  updateStoryStatusAndOrder(storyId, newStatus, newOrder);
 }
 
 /**
  * Update a story's PR link
+ * Uses DB operations directly
  */
-export function updateStoryPRLink(
-  state: KanbanState,
+export function updateStoryPRLinkDb(
   storyId: string,
   prLink: string | null
-): KanbanState {
-  const storyIndex = state.stories.findIndex(s => s.id === storyId);
-  if (storyIndex === -1) return state;
-
-  const updatedStories = [...state.stories];
-  updatedStories[storyIndex] = {
-    ...updatedStories[storyIndex],
-    prLink,
-    updatedAt: new Date().toISOString(),
-  };
-
-  return { ...state, stories: updatedStories };
+): void {
+  updateStory(storyId, { prLink, updatedAt: new Date().toISOString() });
 }
 
 /**
  * Update a story's title
+ * Uses DB operations directly
  */
-export function updateStoryTitle(
-  state: KanbanState,
+export function updateStoryTitleDb(
   storyId: string,
   title: string
-): KanbanState {
-  const storyIndex = state.stories.findIndex(s => s.id === storyId);
-  if (storyIndex === -1) return state;
-
-  const updatedStories = [...state.stories];
-  updatedStories[storyIndex] = {
-    ...updatedStories[storyIndex],
-    title,
-    updatedAt: new Date().toISOString(),
-  };
-
-  return { ...state, stories: updatedStories };
+): void {
+  updateStory(storyId, { title, updatedAt: new Date().toISOString() });
 }

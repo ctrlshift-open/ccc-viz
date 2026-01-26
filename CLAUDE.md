@@ -44,6 +44,8 @@ pnpm bg:stop      # Stop background server
 - Uses WAL mode for concurrent access
 - Import via `getDb()` from `~/db/index.server.ts`
 - Drizzle Kit scripts: `pnpm db:generate`, `pnpm db:push`, `pnpm db:studio`
+- **Query helpers**: `app/db/queries.server.ts` has all CRUD operations (getAllStories, createStory, etc.)
+- **Kanban utils**: `app/utils/kanban.server.ts` wraps DB queries with business logic (sync, session detection)
 
 ### Routing Structure
 Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:

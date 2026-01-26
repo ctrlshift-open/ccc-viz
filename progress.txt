@@ -5,6 +5,24 @@
 - Project type: React Router 7 with SSR
 - E2E: playwright
 - SQLite: better-sqlite3 with drizzle-orm
+- DB queries: `~/db/queries.server.ts` (getAllStories, createStory, updateStory, archiveStory)
+- Kanban utils: `~/utils/kanban.server.ts` wraps DB with business logic
+
+---
+
+## 2026-01-26 - Phase 01: SQLite Database (Task 8/9)
+
+- Updated kanban.server.ts - Replaced JSON file read/write with Drizzle queries
+- Updated kanban.tsx route - Uses DB-direct functions (updateStoryStatusDb, updateStoryTitleDb, updateStoryPRLinkDb)
+- Updated api.kanban.state.ts - Uses getKanbanStateFromDb/saveKanbanStateToDb
+- Updated api.kanban.stories.$storyId.ts - Uses queries.server.ts directly
+- Removed: kanbanStatePath(), kanbanArchivePath(), ensureDir(), saveKanbanState()
+- Files changed: app/utils/kanban.server.ts, app/routes/kanban.tsx, app/routes/api.kanban.state.ts, app/routes/api.kanban.stories.$storyId.ts, CLAUDE.md
+- **Learnings:**
+  - Sync functions return void vs async Promise<KanbanState> - simplifies API
+  - DB-direct ops avoid read-modify-write patterns (no race conditions)
+  - Existing tests still pass because they test routes, not internal functions
+  - Dynamic imports for server modules still needed in routes for SSR boundary
 
 ---
 

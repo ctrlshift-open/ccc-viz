@@ -16,8 +16,8 @@ export async function loader({}: Route.LoaderArgs) {
   const { getKanbanState } = await import("~/utils/kanban.server");
   const { getProjects } = await import("~/projects.server");
 
-  // Just read state - no auto-sync
-  const state = await getKanbanState();
+  // Just read state from DB - no auto-sync
+  const state = getKanbanState();
   const { projects } = await getProjects();
 
   return {
@@ -44,13 +44,8 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "Invalid move request" };
     }
 
-    const { getKanbanState, saveKanbanState, updateStoryStatus } = await import(
-      "~/utils/kanban.server"
-    );
-
-    const state = await getKanbanState();
-    const updatedState = updateStoryStatus(state, storyId, newStatus as KanbanStatus);
-    await saveKanbanState(updatedState);
+    const { updateStoryStatusDb } = await import("~/utils/kanban.server");
+    updateStoryStatusDb(storyId, newStatus as KanbanStatus);
 
     return { success: true };
   }
@@ -63,11 +58,8 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "Invalid title update request" };
     }
 
-    const { getKanbanState, saveKanbanState, updateStoryTitle } = await import("~/utils/kanban.server");
-
-    const state = await getKanbanState();
-    const updatedState = updateStoryTitle(state, storyId, title);
-    await saveKanbanState(updatedState);
+    const { updateStoryTitleDb } = await import("~/utils/kanban.server");
+    updateStoryTitleDb(storyId, title);
 
     return { success: true };
   }
@@ -80,11 +72,8 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "Invalid PR link update request" };
     }
 
-    const { getKanbanState, saveKanbanState, updateStoryPRLink } = await import("~/utils/kanban.server");
-
-    const state = await getKanbanState();
-    const updatedState = updateStoryPRLink(state, storyId, prLink === "" ? null : prLink as string);
-    await saveKanbanState(updatedState);
+    const { updateStoryPRLinkDb } = await import("~/utils/kanban.server");
+    updateStoryPRLinkDb(storyId, prLink === "" ? null : prLink as string);
 
     return { success: true };
   }
@@ -96,11 +85,8 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "Invalid archive request" };
     }
 
-    const { getKanbanState, saveKanbanState, updateStoryStatus } = await import("~/utils/kanban.server");
-
-    const state = await getKanbanState();
-    const updatedState = updateStoryStatus(state, storyId, "archive");
-    await saveKanbanState(updatedState);
+    const { archiveStory } = await import("~/db/queries.server");
+    archiveStory(storyId);
 
     return { success: true };
   }

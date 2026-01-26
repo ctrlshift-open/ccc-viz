@@ -17,17 +17,18 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const { getKanbanState, saveKanbanState, updateStoryStatus, updateStoryTitle, updateStoryPRLink } = await import(
-    "~/utils/kanban.server"
-  );
+  const {
+    getStoryById,
+    updateStory,
+    updateStoryStatusAndOrder,
+  } = await import("~/db/queries.server");
 
   try {
     const body = (await request.json()) as Partial<UpdateStoryInput>;
-    let state = await getKanbanState();
 
     // Find the story
-    const storyIndex = state.stories.findIndex((s) => s.id === storyId);
-    if (storyIndex === -1) {
+    const story = getStoryById(storyId);
+    if (!story) {
       return Response.json({ error: "Story not found" }, { status: 404 });
     }
 
@@ -40,26 +41,24 @@ export async function action({ request, params }: Route.ActionArgs) {
         return Response.json({ error: "Invalid status" }, { status: 400 });
       }
 
-      state = updateStoryStatus(
-        state,
+      updateStoryStatusAndOrder(
         storyId,
-        newStatus ?? state.stories[storyIndex].status,
+        newStatus ?? story.status,
         body.order
       );
     }
 
     // Handle title change
     if (body.title !== undefined) {
-      state = updateStoryTitle(state, storyId, body.title);
+      updateStory(storyId, { title: body.title, updatedAt: new Date().toISOString() });
     }
 
     // Handle PR link change
     if (body.prLink !== undefined) {
-      state = updateStoryPRLink(state, storyId, body.prLink);
+      updateStory(storyId, { prLink: body.prLink, updatedAt: new Date().toISOString() });
     }
 
-    await saveKanbanState(state);
-    const updatedStory = state.stories.find((s) => s.id === storyId);
+    const updatedStory = getStoryById(storyId);
     return Response.json(updatedStory);
   } catch (error) {
     return Response.json(
