@@ -13,6 +13,18 @@
 
 ---
 
+## 2026-01-26 - Phase 03: Archive Tables (COMPLETE)
+
+- All tasks verified complete - kanban.tsx already uses archiveStory() from DB
+- JSON file handling (kanbanArchivePath, saveKanbanState, kanban-archive.json) already removed in previous commits
+- Updated types/kanban.ts comment to reflect SQLite storage
+- Files changed: app/types/kanban.ts (comment update only)
+- **Learnings:**
+  - Previous commits already completed the migration - verify actual code state before marking tasks incomplete
+  - JSON files at ~/.claude/cc-viz/*.json already deleted after migration
+
+---
+
 ## 2026-01-26 - Phase 03: Archive Tables (Tasks 1-2)
 
 - Refactored archiveStory() to use proper SQLite transaction via better-sqlite3
