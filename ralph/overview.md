@@ -12,8 +12,8 @@ Add a slide-over detail panel on the right side of the kanban board. Clicking a 
 |-------|------|--------|---------|
 | 01 | Create StoryDetailPanel Component | completed | ccc-viz-yob3 |
 | 02 | Add Selection State to KanbanBoard | completed | ccc-viz-w651 |
-| 03 | Update KanbanColumn Props | todo | ccc-viz-w931 |
-| 04 | Update StoryCard Selection | todo | ccc-viz-8r2o |
+| 03 | Update KanbanColumn Props | completed | ccc-viz-w931 |
+| 04 | Update StoryCard Selection | in-progress | ccc-viz-8r2o |
 
 Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title status } }'`
 

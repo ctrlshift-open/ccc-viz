@@ -5,9 +5,22 @@
 - React Router 7 with SSR - dynamic imports required for Node.js modules in loaders
 - CSS animations: custom keyframes in app.css, use `animate-` prefix for animation classes
 - Panel pattern: fixed position + backdrop + body scroll lock + escape key handler
-
 - Selection state pattern: useState for ID, useMemo to derive full object from state
 - Prop threading: parent passes selection state + callback, child receives isSelected + onSelect
+- Click vs drag detection: track mousedown position with useRef, compare on click (5px threshold)
+
+---
+
+## 2026-01-26 - Phase 04 (ccc-viz-8r2o)
+
+- Added card selection with click handler and visual ring
+- Implemented click vs drag differentiation using mousedown position tracking
+- Removed inline editing from StoryCard (editing now panel-only)
+- Files changed: StoryCard.tsx, KanbanColumn.tsx, KanbanBoard.tsx
+- **Learnings:**
+  - Use useRef to track mousedown position, compare on click event for drag detection
+  - 5px movement threshold is good balance between precision and tolerance
+  - Removing features simplifies code significantly (went from 283 lines to 203 lines in StoryCard)
 
 ---
 

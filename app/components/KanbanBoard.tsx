@@ -190,8 +190,6 @@ export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRL
             stories={storiesByStatus[status]}
             selectedStoryId={selectedStoryId}
             onStorySelect={handleStorySelect}
-            onTitleChange={onTitleChange}
-            onPRLinkChange={onPRLinkChange}
             onArchive={onArchive}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}

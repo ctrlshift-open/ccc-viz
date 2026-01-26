@@ -6,37 +6,17 @@ type Props = {
   story: KanbanStory;
   isSelected?: boolean;
   onSelect?: (storyId: string) => void;
-  onTitleChange?: (id: string, newTitle: string) => void;
-  onPRLinkChange?: (id: string, prLink: string | null) => void;
   onArchive?: (id: string) => void;
   onDragStart?: (e: React.DragEvent, story: KanbanStory) => void;
   onDragEnd?: (e: React.DragEvent) => void;
 };
 
-export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLinkChange, onArchive, onDragStart, onDragEnd }: Props) {
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editTitle, setEditTitle] = useState(story.title);
-  const [isEditingPRLink, setIsEditingPRLink] = useState(false);
-  const [editPRLink, setEditPRLink] = useState(story.prLink || "");
+export function StoryCard({ story, isSelected, onSelect, onArchive, onDragStart, onDragEnd }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const prInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-      titleInputRef.current.select();
-    }
-  }, [isEditingTitle]);
-
-  useEffect(() => {
-    if (isEditingPRLink && prInputRef.current) {
-      prInputRef.current.focus();
-      prInputRef.current.select();
-    }
-  }, [isEditingPRLink]);
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
 
   // Close menu on click outside
   useEffect(() => {
@@ -57,52 +37,33 @@ export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLink
     onArchive?.(story.id);
   };
 
-  const handleTitleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsEditingTitle(true);
-    setEditTitle(story.title);
+  // Track mouse position on mousedown to differentiate click vs drag
+  const handleMouseDown = (e: React.MouseEvent) => {
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
   };
 
-  const handleTitleSave = () => {
-    const trimmed = editTitle.trim();
-    if (trimmed && trimmed !== story.title) {
-      onTitleChange?.(story.id, trimmed);
+  const handleClick = (e: React.MouseEvent) => {
+    // Don't trigger selection if this was a drag or clicking interactive elements
+    if (isDragging) return;
+
+    // Check if mouse moved significantly (drag detection)
+    if (dragStartPos.current) {
+      const dx = Math.abs(e.clientX - dragStartPos.current.x);
+      const dy = Math.abs(e.clientY - dragStartPos.current.y);
+      if (dx > 5 || dy > 5) return; // Was a drag, not a click
     }
-    setIsEditingTitle(false);
+
+    onSelect?.(story.id);
   };
 
-  const handleTitleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleTitleSave();
-    } else if (e.key === "Escape") {
-      setEditTitle(story.title);
-      setIsEditingTitle(false);
-    }
+  const handleDragStart = (e: React.DragEvent) => {
+    setIsDragging(true);
+    onDragStart?.(e, story);
   };
 
-  const handlePRLinkClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsEditingPRLink(true);
-    setEditPRLink(story.prLink || "");
-  };
-
-  const handlePRLinkSave = () => {
-    const trimmed = editPRLink.trim();
-    if (trimmed !== (story.prLink || "")) {
-      onPRLinkChange?.(story.id, trimmed || null);
-    }
-    setIsEditingPRLink(false);
-  };
-
-  const handlePRLinkKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handlePRLinkSave();
-    } else if (e.key === "Escape") {
-      setEditPRLink(story.prLink || "");
-      setIsEditingPRLink(false);
-    }
+  const handleDragEnd = (e: React.DragEvent) => {
+    setIsDragging(false);
+    onDragEnd?.(e);
   };
 
   // Format timestamp for display
@@ -125,9 +86,13 @@ export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLink
   return (
     <div
       draggable
-      onDragStart={(e) => onDragStart?.(e, story)}
-      onDragEnd={(e) => onDragEnd?.(e)}
-      className="bg-gray-800 border border-gray-700 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-gray-500 transition-colors"
+      onMouseDown={handleMouseDown}
+      onClick={handleClick}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      className={`bg-gray-800 border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-gray-500 transition-colors ${
+        isSelected ? "border-blue-500 ring-2 ring-blue-500" : "border-gray-700"
+      }`}
     >
       {/* Header row: project + PR link + menu */}
       <div className="flex items-center justify-between mb-2">
@@ -136,18 +101,7 @@ export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLink
         </span>
         <div className="flex items-center gap-1">
           {/* PR link */}
-          {isEditingPRLink ? (
-            <input
-              ref={prInputRef}
-              type="text"
-              value={editPRLink}
-              onChange={(e) => setEditPRLink(e.target.value)}
-              onBlur={handlePRLinkSave}
-              onKeyDown={handlePRLinkKeyDown}
-              placeholder="https://github.com/.../pull/123"
-              className="w-40 bg-gray-700 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-100 focus:outline-none focus:border-blue-500"
-            />
-          ) : story.prLink ? (
+          {story.prLink ? (
             <a
               href={story.prLink}
               target="_blank"
@@ -162,25 +116,7 @@ export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLink
               {getPRNumber(story.prLink)}
             </a>
           ) : (
-            <button
-              onClick={handlePRLinkClick}
-              className="text-xs text-gray-500 hover:text-gray-300"
-              title="Add PR link"
-            >
-              + Link PR
-            </button>
-          )}
-          {story.prLink && (
-            <button
-              onClick={handlePRLinkClick}
-              className="p-0.5 text-gray-500 hover:text-gray-300"
-              title="Edit PR link"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </button>
+            <span className="text-xs text-gray-500">No PR</span>
           )}
           {/* Action menu */}
           <div className="relative" ref={menuRef}>
@@ -212,28 +148,12 @@ export function StoryCard({ story, isSelected, onSelect, onTitleChange, onPRLink
         </div>
       </div>
 
-      {/* Title - branch name, editable */}
+      {/* Title - branch name, read-only on card (edit in panel) */}
       <div className="mb-2">
-        {isEditingTitle ? (
-          <input
-            ref={titleInputRef}
-            type="text"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={handleTitleSave}
-            onKeyDown={handleTitleKeyDown}
-            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-blue-500"
-          />
-        ) : (
-          <button
-            onClick={handleTitleClick}
-            className="text-left w-full text-sm font-medium text-gray-100 hover:text-blue-400 flex items-center gap-1"
-            title="Click to edit title"
-          >
-            {story.branch && <span className="text-green-400">🌿</span>}
-            <span className="line-clamp-1">{story.title}</span>
-          </button>
-        )}
+        <div className="text-left w-full text-sm font-medium text-gray-100 flex items-center gap-1">
+          {story.branch && <span className="text-green-400">🌿</span>}
+          <span className="line-clamp-1">{story.title}</span>
+        </div>
       </div>
 
       {/* Sessions section */}

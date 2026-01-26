@@ -7,8 +7,6 @@ type Props = {
   stories: KanbanStory[];
   selectedStoryId?: string | null;
   onStorySelect?: (storyId: string) => void;
-  onTitleChange?: (id: string, newTitle: string) => void;
-  onPRLinkChange?: (id: string, prLink: string | null) => void;
   onArchive?: (id: string) => void;
   onDragStart?: (e: React.DragEvent, story: KanbanStory) => void;
   onDragEnd?: (e: React.DragEvent) => void;
@@ -22,8 +20,6 @@ export function KanbanColumn({
   stories,
   selectedStoryId,
   onStorySelect,
-  onTitleChange,
-  onPRLinkChange,
   onArchive,
   onDragStart,
   onDragEnd,
@@ -65,8 +61,6 @@ export function KanbanColumn({
             story={story}
             isSelected={selectedStoryId === story.id}
             onSelect={onStorySelect}
-            onTitleChange={onTitleChange}
-            onPRLinkChange={onPRLinkChange}
             onArchive={onArchive}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
