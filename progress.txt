@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-01-26 - Phase 01: SQLite Database (Task 6/9)
+
+- Created scripts/migrate-json-to-sqlite.ts - One-time migration script
+- Reads kanban.json + kanban-archive.json, writes to SQLite via saveKanbanStateToDb()
+- Files changed: scripts/migrate-json-to-sqlite.ts, package.json
+- **Learnings:**
+  - `npx tsx` runs TypeScript files directly - shebang: `#!/usr/bin/env npx tsx`
+  - Verification pattern: compare counts before/after migration
+  - Backup strategy: rename JSON files with timestamp suffix before deleting
+  - --dry-run flag pattern: `process.argv.slice(2).includes("--dry-run")`
+  - Can reuse existing query functions (`saveKanbanStateToDb`) from app code in scripts
+
+---
+
 ## 2026-01-26 - Phase 01: SQLite Database (Task 5/9)
 
 - Created app/db/queries.server.ts - Drizzle query helpers
