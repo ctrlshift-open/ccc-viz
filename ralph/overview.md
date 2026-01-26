@@ -1,8 +1,8 @@
-# Kanban Story Detail Slide-Over Panel
+# Kanban Data Model Enhancement Plan
 
 ## Scope
 
-Add a slide-over detail panel on the right side of the kanban board. Clicking a card selects it and opens the panel with full story details, vertical scrolling, and text wrapping. Cards remain compact.
+Performance optimization for kanban - replace slow JSON file operations with SQLite database and file watcher for real-time session detection.
 
 ---
 
@@ -10,10 +10,9 @@ Add a slide-over detail panel on the right side of the kanban board. Clicking a 
 
 | Phase | Name | Status | Bean ID |
 |-------|------|--------|---------|
-| 01 | Create StoryDetailPanel Component | completed | ccc-viz-yob3 |
-| 02 | Add Selection State to KanbanBoard | completed | ccc-viz-w651 |
-| 03 | Update KanbanColumn Props | completed | ccc-viz-w931 |
-| 04 | Update StoryCard Selection | in-progress | ccc-viz-8r2o |
+| 01 | SQLite Database | completed | ccc-viz-trox |
+| 02 | File Watcher | completed | ccc-viz-hbtm |
+| 03 | Archive Tables | completed | ccc-viz-clc6 |
 
 Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title status } }'`
 
@@ -22,10 +21,11 @@ Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title stat
 ## Dependencies
 
 ```
-Phase 01 (Create StoryDetailPanel Component)
-    └── Phase 02 (Add Selection State to KanbanBoard)
-        └── Phase 03 (Update KanbanColumn Props)
-            └── Phase 04 (Update StoryCard Selection)
+Phase 01: SQLite Database
+    │
+    ├──> Phase 02: File Watcher
+    │
+    └──> Phase 03: Archive Tables
 ```
 
 ---
@@ -34,11 +34,11 @@ Phase 01 (Create StoryDetailPanel Component)
 
 | Purpose | Command |
 |---------|---------|
-| Dev server | `pnpm dev` |
-| Type check | `pnpm typecheck` |
-| Run tests | `pnpm test` |
-| Build | `pnpm build` |
-| E2E tests | `pnpm e2e` |
+| Type check | pnpm typecheck |
+| Run tests | pnpm test |
+| Run E2E tests | pnpm e2e |
+| Build | pnpm build |
+| Dev server | pnpm dev |
 
 ---
 

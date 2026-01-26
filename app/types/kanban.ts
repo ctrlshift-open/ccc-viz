@@ -65,7 +65,7 @@ export type KanbanStory = {
   updatedAt: string;
 };
 
-/** Full kanban state stored in ~/.claude/cc-viz/kanban.json */
+/** Full kanban state stored in ~/.claude/cc-viz/kanban.db (SQLite) */
 export type KanbanState = {
   /** Version 2 = story-based model */
   version: 2;
