@@ -31,10 +31,12 @@ pnpm bg:stop      # Stop background server
 - **TailwindCSS v4** for styling
 - **Vite 6** as build tool
 - **pnpm** as package manager
+- **SQLite** (better-sqlite3) with Drizzle ORM for kanban persistence
 
 ### Key Directories
 - `app/routes/` - File-based routes using flatRoutes configuration
 - `app/welcome/` - Reusable UI components
+- `app/db/` - Drizzle schema and database utilities
 - `build/` - Compiled output (client and server bundles)
 
 ### Routing Structure
