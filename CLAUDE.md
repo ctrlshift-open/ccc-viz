@@ -43,6 +43,7 @@ pnpm bg:stop      # Stop background server
 - SQLite database at `~/.claude/cc-viz/kanban.db`
 - Uses WAL mode for concurrent access
 - Import via `getDb()` from `~/db/index.server.ts`
+- Drizzle Kit scripts: `pnpm db:generate`, `pnpm db:push`, `pnpm db:studio`
 
 ### Routing Structure
 Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:

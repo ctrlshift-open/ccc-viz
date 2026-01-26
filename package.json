@@ -21,6 +21,10 @@
     "bg:clean": "rm -rf tmp/",
     "migrate:titles": "npx tsx scripts/migrate-titles.ts",
     "migrate:json-to-sqlite": "npx tsx scripts/migrate-json-to-sqlite.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
     "prepack": "react-router build"
   },
   "bin": {

@@ -5,7 +5,7 @@ status: in-progress
 type: task
 priority: normal
 created_at: 2026-01-26T12:59:08Z
-updated_at: 2026-01-26T13:18:02Z
+updated_at: 2026-01-26T13:20:41Z
 ---
 
 **Depends on:** None
@@ -18,7 +18,7 @@ updated_at: 2026-01-26T13:18:02Z
 - [x] Update vite.config.ts - Add ssr: { external: ["better-sqlite3"] }
 - [x] Create app/db/queries.server.ts - Drizzle query helpers (getStories, updateStory, etc.)
 - [x] Create scripts/migrate-json-to-sqlite.ts - One-time migration from JSON
-- [ ] Create drizzle.config.ts - Drizzle Kit config for migrations
+- [x] Create drizzle.config.ts - Drizzle Kit config for migrations
 - [ ] Update app/utils/kanban.server.ts - Replace JSON read/write with Drizzle queries
 - [ ] Update app/types/kanban.ts - Add Drizzle inference if needed
 

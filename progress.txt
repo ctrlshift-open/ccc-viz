@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-01-26 - Phase 01: SQLite Database (Task 7/9)
+
+- Created drizzle.config.ts - Drizzle Kit config
+- Uses defineConfig from drizzle-kit with sqlite dialect
+- Added db:generate, db:push, db:migrate, db:studio scripts to package.json
+- Files changed: drizzle.config.ts, package.json, CLAUDE.md
+- **Learnings:**
+  - Drizzle Kit config: `defineConfig({ schema, out, dialect, dbCredentials })`
+  - `dialect: "sqlite"` for SQLite databases
+  - `dbCredentials.url` points to the .db file path
+  - Generated migrations go to `./drizzle/` folder
+  - Manual initTables() indexes not captured by drizzle-kit generate - may need to add to schema
+
+---
+
 ## 2026-01-26 - Phase 01: SQLite Database (Task 6/9)
 
 - Created scripts/migrate-json-to-sqlite.ts - One-time migration script
