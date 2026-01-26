@@ -36,8 +36,13 @@ pnpm bg:stop      # Stop background server
 ### Key Directories
 - `app/routes/` - File-based routes using flatRoutes configuration
 - `app/welcome/` - Reusable UI components
-- `app/db/` - Drizzle schema and database utilities
+- `app/db/` - Drizzle schema and database utilities (`index.server.ts` = singleton, `schema.ts` = tables)
 - `build/` - Compiled output (client and server bundles)
+
+### Database
+- SQLite database at `~/.claude/cc-viz/kanban.db`
+- Uses WAL mode for concurrent access
+- Import via `getDb()` from `~/db/index.server.ts`
 
 ### Routing Structure
 Routes are defined in `app/routes.ts` using `@react-router/fs-routes`:

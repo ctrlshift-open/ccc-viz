@@ -19,5 +19,8 @@ export default defineConfig(({ mode }) => {
       port: devPort,
       allowedHosts,
     },
+    ssr: {
+      external: ["better-sqlite3"],
+    },
   };
 });

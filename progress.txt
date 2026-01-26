@@ -8,6 +8,19 @@
 
 ---
 
+## 2026-01-26 - Phase 01: SQLite Database (Task 3/9)
+
+- Created app/db/index.server.ts - DB singleton with WAL mode
+- Added ssr.external for better-sqlite3 in vite.config.ts
+- Files changed: app/db/index.server.ts, vite.config.ts, CLAUDE.md
+- **Learnings:**
+  - WAL mode: `sqliteDb.pragma("journal_mode = WAL")`
+  - Vite SSR needs `ssr: { external: ["better-sqlite3"] }` to avoid bundling native modules
+  - better-sqlite3 uses sync API, no promises needed
+  - DB location: ~/.claude/cc-viz/kanban.db
+
+---
+
 ## 2026-01-26 - Phase 01: SQLite Database (Task 2/9)
 
 - Created app/db/schema.ts with Drizzle schema
