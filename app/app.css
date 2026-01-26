@@ -26,3 +26,17 @@ body {
     color-scheme: dark;
   }
 }
+
+/* Slide-in animation for panels */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out;
+}

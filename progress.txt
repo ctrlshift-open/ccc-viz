@@ -3,87 +3,19 @@
 - Package manager: pnpm
 - Test framework: vitest
 - React Router 7 with SSR - dynamic imports required for Node.js modules in loaders
-- kanban.server.ts is the main server util for kanban state management
-- Session parsing uses resolveSessionFile() from path-safety.server.ts
+- CSS animations: custom keyframes in app.css, use `animate-` prefix for animation classes
+- Panel pattern: fixed position + backdrop + body scroll lock + escape key handler
 
 ---
 
-## 2026-01-25 - ccc-viz-bjgl
+## 2026-01-26 - Phase 01 (ccc-viz-yob3)
 
-- Added beans and progress file visibility to session detail sidebar
-- Files changed:
-  - app/routes/$project.sessions.$sessionId.tsx - show .beans/*.md and progress.txt
+- Created StoryDetailPanel.tsx slide-over component
+- Files changed: app/components/StoryDetailPanel.tsx (new), app/app.css (animation)
 - **Learnings:**
-  - existsSync, readdirSync need dynamic import in loader for SSR
-  - "Tracked" status with blue badge for files without git changes
-  - Extends modifiedMdFiles array with always-show files
-
----
-
-## 2026-01-25 - ccc-viz-tajp (verification)
-
-- Verified Phase 04 CLI migration script and Phase 03 single card regeneration
-- All verification tasks complete for both phases
-- **Learnings:**
-  - `pnpm migrate:titles` successfully processes cards, sets version=1 on AI-titled cards
-  - kanban.json stores version field at card level to track AI-generated titles
-  - syncSessionsToCards() with AI enabled causes slow page loads when many new sessions exist (expected behavior)
-
----
-
-## 2026-01-25 - ccc-viz-tajp
-
-- Created CLI migration script for bulk AI title generation
-- Files changed:
-  - scripts/migrate-titles.ts - standalone script to migrate pre-AI cards
-  - package.json - added `migrate:titles` script
-- **Learnings:**
-  - Use `npx tsx` for running TypeScript scripts directly
-  - Script is resume-safe: saves after each card so interruption won't lose progress
-  - Filters cards by `version === undefined` to find unmigrated cards
-  - Progress format: `[1/50] Processing: "Old Title" → "New Title"`
-
----
-
-## 2026-01-25 - ccc-viz-fzve
-
-- Added single card title regeneration with AI
-- Files changed:
-  - app/routes/api.kanban.cards.$cardId.ts - added POST handler for regeneration
-  - app/components/KanbanCard.tsx - added sparkle button with loading spinner
-  - app/components/KanbanColumn.tsx - pass through regenerate props
-  - app/components/KanbanBoard.tsx - manage regeneratingCardId state, async handler
-  - app/routes/kanban.tsx - handleTitleRegenerate calls POST API, revalidates
-- **Learnings:**
-  - Use fetch() directly for async POST calls, then revalidate with useRevalidator
-  - isRegenerating prop passed down to show spinner on specific card
-  - Star icon (sparkle) used for regenerate button - appears next to editable title
-
----
-
-## 2026-01-25 - ccc-viz-w2eu
-
-- Enabled AI title generation during card creation sync
-- Files changed:
-  - app/utils/kanban.server.ts - updated syncSessionsToCards() to use AI titles with progress logging
-- **Learnings:**
-  - Sequential loop already in place; just needed to flip useAI flag from false to true
-  - Added per-card logging showing session and generated title with AI/fallback indicator
-  - Summary log at end shows total cards and breakdown of AI vs fallback titles
-
----
-
-## 2026-01-25 - ccc-viz-l7gt
-
-- Implemented core AI title generation for kanban cards
-- Files changed:
-  - app/types/kanban.ts - added `version` field to KanbanCard
-  - app/utils/kanban.server.ts - added extractSessionContent(), generateAITitle(), updated generateTitle()
-- **Learnings:**
-  - Claude CLI invoked via: `claude --model haiku --print "<prompt>" < file`
-  - generateTitle() returns {title, version?} - version=1 for AI-generated
-  - AI disabled during sync to avoid rate limits; use migrate script or regenerate button
-  - Session content extraction pulls first/last user + assistant messages (500 char limit each)
+  - TailwindCSS v4 uses @theme instead of @layer base for theme customization
+  - Custom keyframes go in @layer utilities or after base styles
+  - Body scroll lock via document.body.style.overflow = "hidden"
 
 ---
 
