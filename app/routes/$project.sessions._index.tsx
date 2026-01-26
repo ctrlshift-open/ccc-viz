@@ -224,7 +224,7 @@ export default function ProjectSessions() {
   };
 
   return (
-    <main className="p-4 pt-16 md:pt-4 max-w-6xl mx-auto">
+    <main className="p-4 pt-16 md:pt-14 max-w-6xl mx-auto">
       <h1 className="text-xl font-semibold mb-2">Sessions</h1>
       <p className="text-sm text-gray-500 mb-4 break-all">
         Project: <strong>{data.project}</strong>

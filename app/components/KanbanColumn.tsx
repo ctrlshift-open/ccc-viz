@@ -7,6 +7,7 @@ type Props = {
   cards: KanbanCardType[];
   onTitleChange?: (id: string, newTitle: string) => void;
   onTitleRegenerate?: (id: string) => void;
+  onArchive?: (id: string) => void;
   onDragStart?: (e: React.DragEvent, card: KanbanCardType) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -22,6 +23,7 @@ export function KanbanColumn({
   cards,
   onTitleChange,
   onTitleRegenerate,
+  onArchive,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -65,6 +67,7 @@ export function KanbanColumn({
             card={card}
             onTitleChange={onTitleChange}
             onTitleRegenerate={onTitleRegenerate}
+            onArchive={onArchive}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onCardDrop={onCardDrop}

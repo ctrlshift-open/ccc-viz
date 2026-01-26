@@ -6,6 +6,7 @@ type Props = {
   card: KanbanCardType;
   onTitleChange?: (id: string, newTitle: string) => void;
   onTitleRegenerate?: (id: string) => void;
+  onArchive?: (id: string) => void;
   onDragStart?: (e: React.DragEvent, card: KanbanCardType) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onCardDrop?: (targetCard: KanbanCardType) => void;
@@ -13,10 +14,12 @@ type Props = {
   isRegenerating?: boolean;
 };
 
-export function KanbanCard({ card, onTitleChange, onTitleRegenerate, onDragStart, onDragEnd, onCardDrop, isDragTarget, isRegenerating }: Props) {
+export function KanbanCard({ card, onTitleChange, onTitleRegenerate, onArchive, onDragStart, onDragEnd, onCardDrop, isDragTarget, isRegenerating }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(card.title);
+  const [menuOpen, setMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -24,6 +27,25 @@ export function KanbanCard({ card, onTitleChange, onTitleRegenerate, onDragStart
       inputRef.current.select();
     }
   }, [isEditing]);
+
+  // Close menu on click outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  const handleArchive = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    onArchive?.(card.id);
+  };
 
   const handleTitleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -125,6 +147,33 @@ export function KanbanCard({ card, onTitleChange, onTitleRegenerate, onDragStart
                 </svg>
               )}
             </button>
+            {/* Action menu */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(!menuOpen); }}
+                className="flex-shrink-0 p-1 text-gray-400 hover:text-gray-200"
+                title="More actions"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="5" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="12" cy="19" r="2" />
+                </svg>
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-gray-700 border border-gray-600 rounded shadow-lg z-10 min-w-[120px]">
+                  <button
+                    onClick={handleArchive}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+                    </svg>
+                    Archive
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

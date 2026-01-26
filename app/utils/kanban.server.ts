@@ -16,15 +16,48 @@ import { resolveSessionFile } from "~/utils/path-safety.server";
 
 const execAsync = promisify(exec);
 
-/** Path to kanban state file */
+/** Path to kanban state file (active cards) */
 function kanbanStatePath(): string {
   return path.join(homedir(), ".claude", "cc-viz", "kanban.json");
+}
+
+/** Path to kanban archive file (archived cards) */
+function kanbanArchivePath(): string {
+  return path.join(homedir(), ".claude", "cc-viz", "kanban-archive.json");
 }
 
 /** Ensure parent directory exists */
 async function ensureDir(): Promise<void> {
   const dir = path.dirname(kanbanStatePath());
   await fs.mkdir(dir, { recursive: true });
+}
+
+/**
+ * Check if a session was started with haiku model
+ * Returns true if the first assistant message used haiku
+ */
+export async function isHaikuSession(project: string, sessionId: string): Promise<boolean> {
+  const { file } = resolveSessionFile(project, sessionId);
+
+  try {
+    const content = await fs.readFile(file, "utf8");
+    const lines = content.split(/\r?\n/).filter((l) => l.length > 0);
+
+    // Check first 50 lines for an assistant message with model info
+    for (let i = 0; i < Math.min(50, lines.length); i++) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (parsed.type === "assistant" && parsed.message?.model) {
+          return parsed.message.model.toLowerCase().includes("haiku");
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -111,11 +144,12 @@ export async function extractSessionContent(project: string, sessionId: string):
  * @returns Generated title or null on failure
  */
 export async function generateAITitle(contentFilePath: string): Promise<string | null> {
-  const prompt = `Read the conversation excerpts and generate a concise title (3-7 words) that captures the main topic or goal. Output ONLY the title, no quotes, no explanation.`;
+  const systemPrompt = "Output only the requested text. No explanations, questions, or formatting.";
+  const prompt = "Generate a concise 3-7 word title for this conversation. Output ONLY the title.";
 
   try {
     const { stdout } = await execAsync(
-      `claude --model haiku --print "${prompt}" < "${contentFilePath}"`,
+      `claude --model haiku --print --system-prompt "${systemPrompt}" "${prompt}" < "${contentFilePath}"`,
       { timeout: 30000 }
     );
 
@@ -140,30 +174,68 @@ export async function generateAITitle(contentFilePath: string): Promise<string |
 
 /**
  * Read kanban state from disk
- * Returns empty state if file doesn't exist
+ * Merges active cards from kanban.json and archived cards from kanban-archive.json
+ * Returns empty state if files don't exist
  */
 export async function getKanbanState(): Promise<KanbanState> {
+  let activeState: KanbanState = createEmptyKanbanState();
+  let archivedCards: KanbanCard[] = [];
+
+  // Read active state
   try {
     const content = await fs.readFile(kanbanStatePath(), "utf8");
     const state = JSON.parse(content) as KanbanState;
-    // Basic validation
-    if (state.version !== 1 || !Array.isArray(state.cards)) {
-      return createEmptyKanbanState();
+    if (state.version === 1 && Array.isArray(state.cards)) {
+      activeState = state;
     }
-    return state;
-  } catch (error) {
+  } catch {
     // File doesn't exist or is invalid
-    return createEmptyKanbanState();
   }
+
+  // Read archived cards
+  try {
+    const content = await fs.readFile(kanbanArchivePath(), "utf8");
+    const archiveState = JSON.parse(content) as { cards: KanbanCard[] };
+    if (Array.isArray(archiveState.cards)) {
+      archivedCards = archiveState.cards;
+    }
+  } catch {
+    // File doesn't exist or is invalid
+  }
+
+  // Merge cards (active + archived)
+  return {
+    ...activeState,
+    cards: [...activeState.cards, ...archivedCards],
+  };
 }
 
 /**
  * Save kanban state to disk
+ * Splits cards: archived → kanban-archive.json, others → kanban.json
  */
 export async function saveKanbanState(state: KanbanState): Promise<void> {
   await ensureDir();
-  state.lastSyncedAt = new Date().toISOString();
-  await fs.writeFile(kanbanStatePath(), JSON.stringify(state, null, 2), "utf8");
+  const now = new Date().toISOString();
+
+  // Split cards by archive status
+  const activeCards = state.cards.filter(c => c.status !== "archive");
+  const archivedCards = state.cards.filter(c => c.status === "archive");
+
+  // Save active state (with metadata)
+  const activeState: KanbanState = {
+    ...state,
+    cards: activeCards,
+    lastSyncedAt: now,
+  };
+  await fs.writeFile(kanbanStatePath(), JSON.stringify(activeState, null, 2), "utf8");
+
+  // Save archived cards (minimal structure)
+  const archiveState = {
+    cards: archivedCards,
+    lastSyncedAt: now,
+  };
+  await fs.writeFile(kanbanArchivePath(), JSON.stringify(archiveState, null, 2), "utf8");
 }
 
 /**
@@ -277,14 +349,17 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
     .map(c => c.order);
   let nextOrder = existingOrders.length > 0 ? Math.max(...existingOrders) + 1 : 0;
 
-  // Create cards for new sessions with AI-generated titles
-  // Running sequentially to avoid Claude CLI rate limits
+  // Create cards for new sessions with fallback titles (no AI generation)
+  // AI title generation is available via manual migration script: pnpm migrate:titles
+  // Skip haiku sessions - they don't get cards
   const newCards: KanbanCard[] = [];
-  for (let i = 0; i < newSessions.length; i++) {
-    const session = newSessions[i];
-    console.log(`[kanban] Generating title for card ${i + 1}/${newSessions.length}: ${session.project}/${session.sessionId.slice(0, 8)}...`);
-    const { title, version } = await generateTitle(session.project, session.sessionId, true);
-    console.log(`[kanban]   → "${title}"${version ? " (AI)" : " (fallback)"}`);
+  for (const session of newSessions) {
+    // Skip haiku sessions
+    if (await isHaikuSession(session.project, session.sessionId)) {
+      continue;
+    }
+
+    const { title } = await generateTitle(session.project, session.sessionId, false);
     const preview = await getSessionPreview(session.project, session.sessionId);
 
     newCards.push({
@@ -297,7 +372,6 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
       gitBranch: preview?.gitBranch,
       createdAt: session.timestamp,
       updatedAt: new Date().toISOString(),
-      version,
     });
   }
 
@@ -314,8 +388,7 @@ export async function syncSessionsToCards(): Promise<KanbanState> {
 
   await saveKanbanState(updatedState);
 
-  const aiCount = newCards.filter(c => c.version === 1).length;
-  console.log(`[kanban] Sync complete: ${newCards.length} new cards (${aiCount} AI-titled, ${newCards.length - aiCount} fallback)`);
+  console.log(`[kanban] Sync complete: ${newCards.length} new cards added`);
 
   return updatedState;
 }

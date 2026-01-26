@@ -9,6 +9,7 @@ import {
 
 import type { Route } from "./+types/root";
 import { MobileNav } from "~/components/MobileNav";
+import { DesktopNav } from "~/components/DesktopNav";
 import "./app.css";
 
 export const links: Route.LinksFunction = () => [
@@ -46,6 +47,7 @@ export default function App() {
   return (
     <>
       <MobileNav />
+      <DesktopNav />
       <Outlet />
     </>
   );

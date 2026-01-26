@@ -88,6 +88,22 @@ export async function action({ request }: Route.ActionArgs) {
     return { success: true };
   }
 
+  if (intent === "archive") {
+    const cardId = formData.get("cardId");
+
+    if (typeof cardId !== "string") {
+      return { error: "Invalid archive request" };
+    }
+
+    const { getKanbanState, saveKanbanState, updateCardStatus } = await import("~/utils/kanban.server");
+
+    const state = await getKanbanState();
+    const updatedState = updateCardStatus(state, cardId, "archive");
+    await saveKanbanState(updatedState);
+
+    return { success: true };
+  }
+
   return { error: "Unknown intent" };
 }
 
@@ -126,8 +142,15 @@ export default function Kanban() {
     );
   };
 
+  const handleArchive = (cardId: string) => {
+    fetcher.submit(
+      { intent: "archive", cardId },
+      { method: "post" }
+    );
+  };
+
   return (
-    <main className="p-4 pt-16 md:pt-4 h-screen flex flex-col">
+    <main className="p-4 pt-16 md:pt-14 h-screen flex flex-col">
       <h1 className="text-xl font-semibold mb-4">Kanban Board</h1>
       <div className="flex-1 min-h-0">
         <KanbanBoard
@@ -137,6 +160,7 @@ export default function Kanban() {
           onTitleChange={handleTitleChange}
           onTitleRegenerate={handleTitleRegenerate}
           onMerge={handleMerge}
+          onArchive={handleArchive}
         />
       </div>
     </main>

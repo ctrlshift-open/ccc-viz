@@ -5,9 +5,17 @@
 /** Kanban column statuses */
 export type KanbanStatus = "archive" | "back-log" | "in-progress" | "discard" | "complete";
 
-/** Column display order */
+/** Column display order (all statuses for internal use) */
 export const KANBAN_COLUMNS: KanbanStatus[] = [
   "archive",
+  "back-log",
+  "in-progress",
+  "discard",
+  "complete",
+];
+
+/** Columns to display on the kanban board (excludes archive) */
+export const KANBAN_DISPLAY_COLUMNS: KanbanStatus[] = [
   "back-log",
   "in-progress",
   "discard",

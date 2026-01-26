@@ -25,3 +25,4 @@ test-results/.last-run.json
 .ralph/
 .ralph-stop
 ralph-archive/
+agent-chrome-devtools

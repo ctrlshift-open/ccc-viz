@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { KanbanColumn } from "./KanbanColumn";
 import type { KanbanCard, KanbanState, KanbanStatus } from "~/types/kanban";
-import { KANBAN_COLUMNS } from "~/types/kanban";
+import { KANBAN_DISPLAY_COLUMNS } from "~/types/kanban";
 
 type MergeConfirmation = {
   sourceCard: KanbanCard;
@@ -15,9 +15,10 @@ type Props = {
   onTitleChange?: (cardId: string, newTitle: string) => void;
   onTitleRegenerate?: (cardId: string) => Promise<void>;
   onMerge?: (sourceId: string, targetId: string) => void;
+  onArchive?: (cardId: string) => void;
 };
 
-export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitleRegenerate, onMerge }: Props) {
+export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitleRegenerate, onMerge, onArchive }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [draggedCard, setDraggedCard] = useState<KanbanCard | null>(null);
@@ -35,9 +36,13 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
     }
   };
 
-  // Filter cards by search and project
+  // Filter cards by search and project (exclude archived)
   const filteredCards = useMemo(() => {
     return state.cards.filter((card) => {
+      // Exclude archived cards
+      if (card.status === "archive") {
+        return false;
+      }
       // Project filter
       if (projectFilter !== "all" && card.project !== projectFilter) {
         return false;
@@ -50,6 +55,11 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
       return true;
     });
   }, [state.cards, searchQuery, projectFilter]);
+
+  // Count non-archived cards for display
+  const totalNonArchivedCards = useMemo(() => {
+    return state.cards.filter((card) => card.status !== "archive").length;
+  }, [state.cards]);
 
   // Group cards by status
   const cardsByStatus = useMemo(() => {
@@ -154,19 +164,20 @@ export function KanbanBoard({ state, projects, onCardMove, onTitleChange, onTitl
         {/* Card count */}
         <span className="text-sm text-gray-500">
           {filteredCards.length} card{filteredCards.length !== 1 ? "s" : ""}
-          {(searchQuery || projectFilter !== "all") && ` (filtered from ${state.cards.length})`}
+          {(searchQuery || projectFilter !== "all") && ` (filtered from ${totalNonArchivedCards})`}
         </span>
       </div>
 
       {/* Columns */}
       <div className="flex gap-4 overflow-x-auto pb-4">
-        {KANBAN_COLUMNS.map((status) => (
+        {KANBAN_DISPLAY_COLUMNS.map((status) => (
           <KanbanColumn
             key={status}
             status={status}
             cards={cardsByStatus[status]}
             onTitleChange={onTitleChange}
             onTitleRegenerate={handleTitleRegenerate}
+            onArchive={onArchive}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             onDragOver={() => handleDragOver(status)}

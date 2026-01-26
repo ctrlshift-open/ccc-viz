@@ -945,7 +945,7 @@ export default function SessionDetails() {
   }, [totalsFetcher.state, totalsFetcher.data]);
 
   return (
-    <main className="p-4 pt-16 md:pt-4 max-w-screen-md mx-auto overflow-x-hidden">
+    <main className="p-4 pt-16 md:pt-14 max-w-screen-md mx-auto overflow-x-hidden">
       <h1 className="text-xl font-semibold mb-2">
         {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)} - Session Details
       </h1>
