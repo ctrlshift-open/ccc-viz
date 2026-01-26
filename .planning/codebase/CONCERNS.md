@@ -1,203 +1,198 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-01-25
+**Analysis Date:** 2026-01-26
 
 ## Tech Debt
 
-### Large Monolithic Route Components
-- **Issue:** `app/routes/$project.sessions.$sessionId.tsx` is 2086 lines with mixed concerns (UI, data loading, file I/O, cost calculations, streaming). This makes it difficult to test, refactor, and maintain. Contains multiple loader, action, and component logic intertwined.
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx`
-- **Impact:** Refactoring any single feature requires understanding the entire file. Bug fixes risk unintended side effects. Component testing is impractical at current scale.
-- **Fix approach:** Extract loaders into separate server files (.server.ts), break component into smaller sub-components. Consider splitting data loading and UI rendering logic.
+**Silent error handling in JSON parsing:**
+- Issue: Throughout the codebase, JSON parsing wrapped in try-catch blocks silently swallow errors. If a JSON line is malformed, the system returns nothing instead of logging/alerting.
+- Files: `app/sessions.server.ts` (lines 27-31, 54-56, 91-110), `app/utils/kanban.server.ts` (lines 50-56, 80-82, 211), `app/utils/file-tail.server.ts` (line 168), `app/routes/api.sessions.costs.ts`
+- Impact: Makes debugging difficult. Corrupt session files or unexpected data formats silently fail, leaving data missing from UI with no indication of the problem.
+- Fix approach: Add debug logging or error counters before silent returns; consider a monitoring/alerting layer for recurring failures.
 
-### Type Casting with `any`
-- **Issue:** Widespread use of `as any` casts throughout the codebase, particularly in session parsing and message classification logic. Examples: `as any` in `$project.sessions.$sessionId.tsx` lines 107, 239, 340, 353, 376, 383, etc.
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx`, `app/routes/api.sessions.$project.$sessionId.totals.ts`, `app/routes/api.sessions.$project.active-status.ts`, `app/utils/file-tail.server.ts`
-- **Impact:** Type safety bypassed, missed errors at compile time, difficult debugging. Potential runtime errors from unexpected data structures.
-- **Fix approach:** Create discriminated unions for message types, define strict interfaces for all JSON-parsed data structures. Replace casting with proper type guards and validation.
+**Large component file coupling:**
+- Issue: `app/routes/$project.sessions.$sessionId.tsx` is 2086 lines - a monolithic component mixing data loading, filtering, formatting, rendering, and event handling.
+- Files: `app/routes/$project.sessions.$sessionId.tsx`
+- Impact: Hard to test, maintain, and reuse components. Changes to one concern affect the whole file. Performance issues (re-renders) are harder to isolate.
+- Fix approach: Extract into smaller components: MessageRenderer (rendering logic), FilterPanel (filtering UI), CostCalculator (cost aggregation), HeaderNav (header layout). Consider custom hooks for state management.
 
-### Silent Error Swallowing
-- **Issue:** Multiple `catch` blocks with empty handlers or generic logging (`catch {}`, `catch { /* ignore subscriber errors */ }`). Examples in `app/utils/file-tail.server.ts` lines 176, 203, 230, 236, 237.
-- **Files:** `app/utils/file-tail.server.ts`, `app/routes/$project.sessions.$sessionId.tsx`, `app/utils/kanban.server.ts`, `app/routes/api.sessions.$project.$sessionId.stream.ts`
-- **Impact:** Silent failures make debugging difficult. Resource leaks when subscriptions fail to clean up. File handles left open, memory not released.
-- **Fix approach:** Log error details before swallowing. Implement structured error tracking. For critical resources (file handles, subscriptions), fail loudly if cleanup fails.
+**Inefficient session preview collection:**
+- Issue: `getSessionPreviews()` reads session files and scans up to 50-100 lines per file to extract previews. When listing 20+ sessions, this reads MBs of disk unnecessarily.
+- Files: `app/sessions.server.ts` (lines 132-148), `app/routes/$project.sessions._index.tsx` (lines 100-150)
+- Impact: Slow page loads on projects with many sessions. Each preview fetch reads partial file content sequentially.
+- Fix approach: Cache previews in `.claude/cc-viz/previews.json` with mtime-based invalidation. Only re-scan files that changed since last cache update.
 
-### Temporal File-Based Coupling
-- **Issue:** Session name generation creates temp files in `tmpdir()` and relies on cleanup in `finally` block. Path safety checks use string manipulation instead of proper path validation. `app/utils/kanban.server.ts` line 151 uses shell command injection risk.
-- **Files:** `app/utils/kanban.server.ts` lines 151, 181-182, `app/utils/path-safety.server.ts`
-- **Impact:** Temp files may accumulate if process crashes. Race conditions if multiple instances run simultaneously. Potential path traversal if path manipulation is incorrect.
-- **Fix approach:** Use temp file library with guaranteed cleanup. Validate all paths with OS-level APIs (not string parsing). Escape all shell arguments properly.
+**Unsafe working directory detection:**
+- Issue: Working directory inferred by scanning first 20-30 lines of a session file for `cwd` field. If not found, defaults to "/" or fails silently.
+- Files: `app/routes/_index.tsx` (lines 52-75), `app/routes/$project.sessions.$sessionId.tsx` (lines 62-81)
+- Impact: File operations in wrong directory when cwd not present. Security check in path-safety.server.ts may block legitimate reads if working directory is misdetected.
+- Fix approach: Require explicit cwd in session metadata. Add validation that first line must contain cwd or fail loudly.
 
 ## Known Bugs
 
-### File Handle Leak Risk in FileTailer
-- **Symptoms:** Long-running streams consume file handles. When browser tab closes without proper unsubscription, handles may not release immediately.
-- **Files:** `app/utils/file-tail.server.ts`
-- **Trigger:** Open session detail view, navigate away without waiting for unsubscribe cleanup. Under high load with many concurrent streams.
-- **Workaround:** Browser refresh forces cleanup. Can manually dispose via tailer registry.
-- **Root cause:** TTL-based cleanup (60s) may not trigger if tailer held in memory. File watcher may not detect all rename/rotation events on certain filesystems.
+**File tailer memory leak under rapid reconnects:**
+- Symptoms: Memory grows when browser repeatedly reconnects to SSE stream (network flaps, tab switch)
+- Files: `app/utils/file-tail.server.ts` (lines 216-222, 249-260)
+- Trigger: Open session view, rapidly toggle tab focus or refresh connection repeatedly
+- Current state: Disposal timer (60s TTL) should clean up unused tailers, but if reconnect happens within TTL, new subscriber added while old one still pending cleanup
+- Workaround: Manual server restart clears registry
 
-### JSON Parsing Errors Unhandled
-- **Symptoms:** Malformed JSONL lines silently skipped. User sees gaps in message count without explanation.
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx` lines 139, 209-213, `app/utils/file-tail.server.ts` lines 168-170
-- **Trigger:** Corrupted session file, partial writes during concurrent access, file rotation mid-line
-- **Workaround:** Restart app to re-read file
-- **Root cause:** JSONL format is fragile. No validation that lines are properly closed before parsing. No recovery mechanism for partial data.
+**JSON parsing for PR detection can throw uncaught:**
+- Symptoms: Route errors when gh PR output is not valid JSON
+- Files: `app/utils/kanban.server.ts` (line 211)
+- Trigger: `gh pr list` command succeeds but outputs non-JSON (e.g., warning text), or network error mid-response
+- Current state: Wrapped in catch but doesn't validate `stdout` is JSON before parsing
+- Workaround: None - just returns null on any error
 
-### Race Condition in Kanban State Sync
-- **Symptoms:** Multiple sync operations can overwrite each other. If two requests call `syncWithProjects()` simultaneously, later writes may lose earlier updates.
-- **Files:** `app/utils/kanban.server.ts` lines 223-257, 263-286
-- **Trigger:** Rapid API calls from concurrent browser tabs/users, or manual sync while background import in progress
-- **Workaround:** Refresh page to load latest state
-- **Root cause:** File I/O operations are not atomic. No locking mechanism prevents concurrent writes.
+**UTF-8 decoding errors in file-tail:**
+- Symptoms: Malformed characters appear in session view, or stream stops updating
+- Files: `app/utils/file-tail.server.ts` (line 150) - `.toString("utf8")` on buffer chunk without validation
+- Trigger: Session file written by process with encoding issues; byte buffer split mid-multibyte UTF-8 sequence
+- Current state: Leftover handling (line 159) only tracks text after split, not mid-byte sequences
+- Workaround: Restart stream from last complete line
 
 ## Security Considerations
 
-### Path Traversal in File Reading
-- **Risk:** Despite path safety checks, complex path manipulation in `$project.sessions.$sessionId.tsx` action handler (lines 84-90) has multiple validation points that could be bypassed if any check is incorrect.
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx` lines 84-90, `app/utils/path-safety.server.ts`
-- **Current mitigation:** Path validation using `relative()` and string prefix check. 256-char segment limit. Null byte check.
-- **Recommendations:** Use OS symlink resolution (`fs.realpath`) to verify final target is within allowed directory. Consider allowlist of readable paths instead of blocklist approach. Add integration tests with symlink attacks.
+**Directory traversal protection is solid but assumes safe parameters:**
+- Risk: If project/sessionId parameters bypassed, path validation could fail
+- Files: `app/utils/path-safety.server.ts` (lines 27-54)
+- Current mitigation: `isSafeSegment()` blocks `..`, `.`, path separators, null bytes. Relative path validation checks both directions (inside base dir check).
+- Recommendations: Add logging when assertion fails; consider rate-limiting by IP if parameter tampering detected.
 
-### Shell Injection in PR Detection
-- **Risk:** `gh` command in kanban.server.ts line 207 uses template literals with branch name. If branch name contains backticks or command separators, arbitrary commands could execute.
-- **Files:** `app/utils/kanban.server.ts` lines 206-208
-- **Current mitigation:** Branch name from filesystem (git output), not user input. `gh` CLI may reject malicious input.
-- **Recommendations:** Use `execAsync` with explicit `args` parameter (not shell=true). Shell-escape branch name if not using args array. Add validation that branch names match git identifier rules.
+**No validation of session file content structure:**
+- Risk: Malicious or corrupted session file could cause DOS via resource exhaustion (huge messages, nested objects)
+- Files: `app/sessions.server.ts`, `app/routes/$project.sessions.$sessionId.tsx`
+- Current mitigation: File size checked (1MB max for file read in action), but no per-entry size limit or nesting depth check
+- Recommendations: Add schema validation for session entries; limit JSON parse depth; add timeouts to expensive operations.
 
-### AI Model Prompt Injection
-- **Risk:** User message content fed directly to Claude CLI for session name generation without sanitization (`app/utils/kanban.server.ts` lines 146-152).
-- **Files:** `app/utils/kanban.server.ts` lines 145-172
-- **Current mitigation:** Truncation to 500 chars per message. Timeout of 30s. Output validation (length <60, no newlines).
-- **Recommendations:** Add explicit escaping of special characters before passing to CLI. Validate output matches expected format (alphanumeric, hyphens, spaces only). Consider using API instead of CLI to avoid shell injection entirely.
-
-### Exposed Session File Path in Stream Handlers
-- **Risk:** File tail streaming exposes file paths in error messages. Errors propagated to client contain full filesystem paths.
-- **Files:** `app/routes/api.sessions.$project.$sessionId.stream.ts`, `app/utils/file-tail.server.ts`
-- **Current mitigation:** Error details not explicitly leaked in stream protocol
-- **Recommendations:** Never include full paths in client-facing error messages. Use session IDs only.
+**File path resolution from user input (readFile action):**
+- Risk: Attacker supplies filepath that resolves outside project working directory despite checks
+- Files: `app/routes/$project.sessions.$sessionId.tsx` (lines 84-90)
+- Current mitigation: `relative()` comparison and prefix check for directory traversal
+- Recommendations: Add test cases for edge cases (symlinks, case sensitivity on Windows). Consider using `fs.realpath()` to resolve symlinks before comparison.
 
 ## Performance Bottlenecks
 
-### Entire File Parsing for Category Collection
-- **Problem:** `$project.sessions.$sessionId.tsx` loader iterates entire file to collect message categories (lines 270-277). On 100k+ line sessions, this is O(n) scan.
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx` lines 218-290
-- **Cause:** Categories needed upfront for filter UI, but only current page loaded. No incremental category discovery.
-- **Improvement path:** Cache category map on disk alongside session file. Update incrementally as new lines appended. Precompute statistics server-side.
+**Kanban sync operation scans entire file system:**
+- Problem: `syncSessionsToStories()` reads all projects, all session files, and all sessions to find new stories
+- Files: `app/utils/kanban.server.ts` (lines 289-360+)
+- Cause: Called from kanban.tsx action handler; no incremental tracking
+- Impact: Slow with 50+ projects and 1000+ sessions; blocks UI during sync
+- Improvement path: Store last sync timestamp; only scan files modified after that. Use filesystem watcher instead of full scan on each action.
 
-### Synchronous File Stat in Loop
-- **Problem:** `getProjects()` in `app/projects.server.ts` calls `stat()` for each session file sequentially, not in parallel.
-- **Files:** `app/utils/kanban.server.ts` lines 296-310
-- **Cause:** Sequential I/O in `getAllSessions()` loop. Could be `Promise.all()`.
-- **Improvement path:** Batch file operations using `Promise.all()` for directories with many files.
+**Session list filtering done client-side after loading all previews:**
+- Problem: Preview API loads all sessions, client filters after fetching previews
+- Files: `app/routes/$project.sessions._index.tsx` (lines 100+), component state uses loaded previews to filter
+- Cause: No server-side filtering support
+- Impact: With 100+ sessions per project, fetches unnecessary data, UI freezes while filtering
+- Improvement path: Add query params to preview API for filtering (branch, date range). Server-side pre-filter before building response.
 
-### FileTailer Memory Accumulation
-- **Problem:** `leftover` buffer in FileTailer can grow if file contains very long lines without newlines (e.g., binary data, base64). No bounds checking.
-- **Files:** `app/utils/file-tail.server.ts` lines 22, 159, 173-174
-- **Cause:** Partial lines accumulated in string without size limit.
-- **Improvement path:** Implement max line length (e.g., 1MB). Truncate or reject excessively long lines.
+**File-tail reads up to 8MB per poll cycle:**
+- Problem: Single read can buffer 8MB into memory
+- Files: `app/utils/file-tail.server.ts` (line 142)
+- Cause: No backpressure or chunking to subscribers
+- Impact: Memory spike if session file grows rapidly; slower subscribers lag behind
+- Improvement path: Implement backpressure - if broadcast is slow, delay next read. Add subscriber-specific cursors to avoid replay.
 
-### Session Preview Fetching Not Batched
-- **Problem:** `$project.sessions._index.tsx` client-side fetches session preview and costs one-by-one in effects. If 50 sessions, 50+ HTTP requests.
-- **Files:** `app/routes/$project.sessions._index.tsx` lines 90-150
-- **Cause:** No batch fetch endpoint. Individual fetchers per session.
-- **Improvement path:** Create `/api/sessions/:project/batch-preview` endpoint accepting multiple session IDs, return all previews in one request.
+**Project directory stat called for each file:**
+- Problem: In `getProjects()`, stat() called once per .jsonl file to get mtime
+- Files: `app/projects.server.ts` (lines 31-56)
+- Cause: Inefficient file listing pattern
+- Impact: 50 files = 50 syscalls per load
+- Improvement path: Use `fs.readdir({ withFileTypes: true })` with `dirent.mtime` if available; cache project list with TTL.
 
 ## Fragile Areas
 
-### Session Message Classification Logic
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx` lines 239-277, `app/routes/api.sessions.$project.$sessionId.totals.ts` lines 36-120
-- **Why fragile:** Complex nested logic for detecting message types from nested arrays. Uses duck-typing (checking `.type` property) instead of discriminated unions. Duplicated across multiple files.
-- **Safe modification:** Create shared `classifyMessage()` function in utilities. Write unit tests covering all edge cases. Use type guards instead of casting.
-- **Test coverage:** No tests for classification logic. Edge cases like empty content arrays, missing type fields untested.
+**Session message rendering with dynamic types:**
+- Files: `app/routes/$project.sessions.$sessionId.tsx` (lines 1400-1900+)
+- Why fragile: Assumes message structure (`parsed.type`, `parsed.message`, nested content arrays). Any new message type or renamed field breaks rendering silently.
+- Safe modification: Add strict type guards for message types; validate structure before rendering. Use discriminated unions for message type checking.
+- Test coverage: No unit tests for message rendering; only manual testing
 
-### Kanban Story Ordering Logic
-- **Files:** `app/utils/kanban.server.ts` lines 443-496
-- **Why fragile:** Complex reordering algorithm when moving stories between columns. Multiple index manipulations with potential off-by-one errors.
-- **Safe modification:** Add comprehensive unit tests for all move scenarios (within column, between columns, edge positions). Use immutable update patterns.
-- **Test coverage:** No tests. Bugs could silently corrupt story order.
+**File tailer watcher state machine:**
+- Files: `app/utils/file-tail.server.ts` (entire FileTailer class)
+- Why fragile: Complex state: `reading`, `pendingRead`, `disposed`, `disposeTimer`, watcher lifecycle. Race conditions between readNew() cycles, subscription changes, and disposal.
+- Safe modification: Add state enum to make transitions explicit. Add invariant checks (e.g., reading=false implies no pending promises). Add integration test for rapid subscribe/unsubscribe.
+- Test coverage: No tests for subscription lifecycle or disposal under load
 
-### Path Safety Validation
-- **Files:** `app/utils/path-safety.server.ts`
-- **Why fragile:** String-based path validation prone to edge cases. Windows path handling not tested (code uses forward slash assumptions).
-- **Safe modification:** Add tests for symlinks, relative paths with ../, unicode in paths, Windows UNC paths. Consider using `path.resolve()` + `fs.realpath()` comparison instead.
-- **Test coverage:** Only basic validation tested in `routes-no-node-imports.test.ts`. No path traversal attack tests.
+**Kanban state persistence across multiple endpoints:**
+- Files: `app/routes/kanban.tsx` (action handler), `app/utils/kanban.server.ts` (saveKanbanState), both write to kanban.json
+- Why fragile: Multiple routes can call saveKanbanState simultaneously. No locking mechanism - concurrent writes can corrupt JSON or lose updates.
+- Safe modification: Implement file-based locking using flock or temp file atomic swap. Or switch to database with transactions.
+- Test coverage: No concurrent write tests
 
 ## Scaling Limits
 
-### Kanban State File Size
-- **Current capacity:** Likely 10k-50k stories before JSON parsing becomes slow
-- **Limit:** File size approaches 10MB, startup and read/write operations stall. JSON parse in Node becomes noticeably slow.
-- **Scaling path:** Split archive into multiple files by year. Implement lazy loading (load only recent stories initially). Use JSON streaming parser.
+**File-tail registry unbounded memory:**
+- Current capacity: Limited by number of unique (project, sessionId) pairs with active subscribers
+- Limit: With 60s TTL, if users have 100 sessions open simultaneously, registry holds 100 FileTailer instances = several MB
+- Scaling path: Implement LRU eviction for tailers with no subscribers; add memory limit + emergency flush. Monitor registry size metrics.
 
-### FileTailer Registry
-- **Current capacity:** Default 60s TTL means 1 active tailer per unique session, cleared on last unsubscribe
-- **Limit:** High concurrency (100+ simultaneous viewers) could exhaust file handles. No explicit limit on registry size.
-- **Scaling path:** Add configurable registry size limit. Implement LRU eviction. Monitor handle count.
+**Kanban state file growth unbounded:**
+- Current capacity: kanban.json and kanban-archive.json grow with each new story (no cleanup/archival of old archived stories)
+- Limit: After running for months with 1000+ stories, files exceed reasonable size (100MB+ possible)
+- Scaling path: Implement file rotation - move very old archived stories to time-stamped archive files. Add cleanup policy (delete archived > 1 year old).
 
-### Session Detail View Page Size
-- **Current capacity:** Default 25 lines per page, max 100 lines
-- **Limit:** 100-line page loads fast, but pagination UI becomes unwieldy with 1000+ pages
-- **Scaling path:** Implement cursor-based infinite scroll instead. Cache parsed lines in memory.
+**Session file disk usage:**
+- Current capacity: No cleanup of old session files; they accumulate in ~/.claude/projects/*/
+- Limit: With heavy usage (50+ sessions per day), disk fills quickly; no rotation/cleanup
+- Scaling path: Implement session file expiration policy (e.g., keep last 30 days, archive older). Add disk usage monitoring and admin cleanup UI.
 
 ## Dependencies at Risk
 
-### `ccusage` Library for Cost Calculation
-- **Risk:** Cost data hardcoded in dependency. If model pricing changes, must wait for package update. No offline pricing updates.
-- **Impact:** Displayed costs become stale if pricing changes before update released.
-- **Migration plan:** Consider fetching pricing from official source or storing locally with manual updates.
+**No type checking for ccusage library:**
+- Risk: `app/utils/file-tail.server.ts` (line 104) dynamically imports `ccusage/pricing-fetcher` and `ccusage/data-loader`. If ccusage package version changes API, no error until runtime.
+- Impact: File tailer silently loses cost calculation ability if import fails
+- Migration plan: Add type definitions or move ccusage to peerDependency with clear version constraints. Test cost calculation on CI.
 
-### Nanoid for ID Generation
-- **Risk:** No risk detected. Standard library, well-maintained, collision risk negligible.
-- **Impact:** N/A
-- **Migration plan:** N/A
+**External command execution (gh CLI):**
+- Risk: `app/utils/kanban.server.ts` (line 206) runs `gh pr list` via execAsync. Depends on gh CLI being installed and github.com accessible.
+- Impact: PR detection fails silently in environments without gh; kanban features degrade
+- Migration plan: Add fallback to GitHub GraphQL API using token. Fall back gracefully if gh not available. Test in disconnected environments.
 
 ## Missing Critical Features
 
-### Concurrent Edit Conflict Resolution
-- **Problem:** If two users modify kanban state simultaneously (drag story, change title), last write wins. No merge strategy.
-- **Blocks:** Multi-user collaboration, CI/CD integration to auto-update kanban
+**No conflict resolution for concurrent kanban edits:**
+- Problem: If two browser windows edit same story simultaneously, last write wins (lost update)
+- Blocks: Multi-user collaboration on kanban board
+- Scope: Would require adding versioning/CRDT or optimistic locking to KanbanState
 
-### JSONL Corruption Recovery
-- **Problem:** No mechanism to repair or recover from truncated/corrupted session files. Files are not validated on startup.
-- **Blocks:** Reliable file handling after crashes or power loss
+**No pagination in session lists:**
+- Problem: Projects with 500+ sessions load all previews at once (slow, memory intensive)
+- Blocks: Smooth browsing of projects with long session histories
+- Scope: Add cursor-based pagination to preview API; implement infinite scroll UI
 
-### Audit Trail for Kanban Changes
-- **Problem:** No history of who moved what story when. Changes overwrite previous state.
-- **Blocks:** Understanding edit history, reverting accidental changes
+**No retry logic for failed file operations:**
+- Problem: Single transient IO error (file locked, permission) fails entire request
+- Blocks: Robustness in environments with unstable filesystems or concurrent access
+- Scope: Add exponential backoff retry wrapper around fs operations
 
 ## Test Coverage Gaps
 
-### Core Kanban Logic
-- **What's not tested:** Story reordering across columns, archive/unarchive logic, PR link detection, session name generation
-- **Files:** `app/utils/kanban.server.ts` (538 lines, ~0% test coverage)
-- **Risk:** Silent order corruption, data loss on column move, broken PR detection
-- **Priority:** High - core feature logic
+**File tailer subscription lifecycle:**
+- What's not tested: Race conditions between subscribe/unsubscribe, file watcher events, and dispose timer
+- Files: `app/utils/file-tail.server.ts`
+- Risk: Memory leaks or crashes under rapid connection cycling
+- Priority: High
 
-### Path Safety Validation
-- **What's not tested:** Symlink resolution, Windows paths, unicode filenames, attempted path traversal attacks
-- **Files:** `app/utils/path-safety.server.ts` (55 lines, ~20% coverage via routes-no-node-imports test)
-- **Risk:** Security bypass, file access outside project directory
-- **Priority:** High - security-critical
+**Kanban state mutations:**
+- What's not tested: Concurrent updates to kanban.json; validation of state transitions (e.g., can status move from "archive" to "in-progress"?)
+- Files: `app/utils/kanban.server.ts` (updateStoryStatus, updateStoryTitle, etc.)
+- Risk: Corrupted state or invalid transitions silently allowed
+- Priority: High
 
-### Message Classification
-- **What's not tested:** Edge cases in message type detection (empty arrays, missing fields, nested content)
-- **Files:** `app/routes/$project.sessions.$sessionId.tsx` lines 239-277
-- **Risk:** Incorrect message filtering, missing messages in UI
-- **Priority:** Medium - affects UI accuracy
+**Session message rendering with malformed data:**
+- What's not tested: Rendering with missing fields, unexpected types, deeply nested arrays
+- Files: `app/routes/$project.sessions.$sessionId.tsx` (MessageRenderer component)
+- Risk: UI crashes or hangs on edge case data
+- Priority: Medium
 
-### FileTailer Cleanup
-- **What's not tested:** Subscription cleanup, TTL disposal, file rotation handling, race conditions
-- **Files:** `app/utils/file-tail.server.ts` (275 lines, ~0% test coverage)
-- **Risk:** File handle leaks, memory accumulation, missed updates
-- **Priority:** Medium - affects stability
-
-### Streaming Endpoint Error Handling
-- **What's not tested:** Network interruption recovery, subscription timeout, controller errors
-- **Files:** `app/routes/api.sessions.$project.$sessionId.stream.ts` (60 lines, ~0% test coverage)
-- **Risk:** Stuck client streams, missed updates
-- **Priority:** Low - graceful degradation via browser fallback
+**Error boundaries and error states:**
+- What's not tested: Routes with missing projects/sessions; loader errors; network failures
+- Files: All route loaders, actions
+- Risk: Unhandled errors crash app or show blank screen
+- Priority: Medium
 
 ---
 
-*Concerns audit: 2026-01-25*
+*Concerns audit: 2026-01-26*

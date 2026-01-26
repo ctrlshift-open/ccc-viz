@@ -1,257 +1,149 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-01-25
+**Analysis Date:** 2026-01-26
 
 ## Naming Patterns
 
 **Files:**
-- Components: PascalCase (e.g., `KanbanBoard.tsx`, `StoryCard.tsx`)
-- Utilities: camelCase (e.g., `format.ts`, `path-safety.server.ts`)
-- Server utilities: `.server.ts` suffix for Node.js-only modules (e.g., `kanban.server.ts`, `projects.server.ts`)
-- Routes: Kebab-case with dot notation (e.g., `api.kanban.state.ts`, `$project.sessions.$sessionId.tsx`)
-- Types: PascalCase in files prefixed with `type/` (e.g., `kanban.ts` for Kanban types)
+- React components: PascalCase (e.g., `KanbanBoard.tsx`, `MessageTypeIcon.tsx`)
+- Server modules: camelCase with `.server` suffix (e.g., `sessions.server.ts`, `kanban.server.ts`)
+- Utilities: camelCase (e.g., `format.ts`, `file-tail.server.ts`)
+- Route files: kebab-case with dynamic segment prefixes using `$` (e.g., `$project.sessions._index.tsx`)
 
 **Functions:**
-- Exported functions: camelCase (e.g., `formatUSD()`, `getProjects()`, `getKanbanState()`)
-- Handlers: `handle[Action]` pattern (e.g., `handleDragStart()`, `handleTitleSave()`)
-- Async operations: `[verb][Noun]` pattern (e.g., `syncSessionsToStories()`, `isHaikuSession()`)
-- Utility helpers: Simple verbs (e.g., `walk()`, `formatDate()`)
+- Exported functions: camelCase (e.g., `getProjects()`, `formatUSD()`, `getSessionPreview()`)
+- React components: PascalCase (e.g., `KanbanBoard()`, `MessageTypeIcon()`)
+- Internal/private helpers: camelCase with descriptive names
 
 **Variables:**
-- State hooks: camelCase (e.g., `searchQuery`, `draggedStory`, `projectFilter`)
-- Boolean flags: `is[State]` or `[action]Open` patterns (e.g., `isEditingTitle`, `menuOpen`, `isDragOver`)
-- Refs: camelCase + `Ref` suffix (e.g., `titleInputRef`, `menuRef`)
-- Object records: `[noun]ByKey` pattern (e.g., `storiesByStatus`, grouped by key)
-- Constants: UPPER_SNAKE_CASE (e.g., `KANBAN_COLUMNS`, `KANBAN_DISPLAY_COLUMNS`, `KANBAN_LABELS`)
+- Constants with INTENT: CONSTANT_CASE (e.g., `KANBAN_COLUMNS`, `KANBAN_LABELS`, `COST_GRADIENT`)
+- Local variables: camelCase (e.g., `mostRecentTime`, `filteredStories`, `isDragOver`)
+- Booleans: prefix with `is` or `has` (e.g., `isDragOver`, `isSyncing`, `isHaikuSession`)
+- Loop indices: short names like `i`, `index` acceptable in iteration
 
 **Types:**
-- Exported types: PascalCase (e.g., `KanbanStatus`, `KanbanStory`, `KanbanState`)
-- Props types: `Props` (e.g., `type Props = { story: KanbanStory }`)
-- Type imports: `type` keyword used (e.g., `import type { KanbanStatus } from "~/types/kanban"`)
-- Union types: Used for specific domains (e.g., `"archive" | "back-log" | "in-progress"`)
-- Record types: `Record<Key, Value>` pattern (e.g., `Record<KanbanStatus, KanbanStory[]>`)
+- Type aliases: PascalCase with `Type` suffix or descriptive noun (e.g., `SessionPreview`, `KanbanStory`, `KanbanStatus`, `CostScope`)
+- Record/map objects: describe the key-value relationship (e.g., `Record<string, SessionPreview | null>`)
+- Type discriminated unions used for error handling (e.g., `{ ok: true; value } | { ok: false; value }`)
 
 ## Code Style
 
 **Formatting:**
-- No explicit eslint/prettier config detected (follows React Router 7 defaults)
-- Consistent 2-space indentation (observed throughout)
-- No semicolons at end of JSX elements
-- Trailing commas in objects/arrays
-- String quotes: Double quotes for strings
+- No ESLint or Prettier config detected
+- Manual formatting observed with 2-space indentation
+- Double quotes for strings (e.g., `"utf8"`, `"project"`)
+- Arrow functions preferred (e.g., `const formatUSD = (amount) => { ... }`)
+- JSDoc comments used for public functions and types
 
-**Line length:**
-- JSX attributes wrap at readable boundaries (~120-130 char estimation)
-- Long className strings stay inline with component
-
-**React Patterns:**
-- Functional components exclusively
-- Inline event handlers use arrow functions (e.g., `onClick={(e) => handleClick(e)}`)
-- Type Props interface declared before component
-- Component signature shows destructured props with trailing comma
+**Linting:**
+- TypeScript strict mode enabled (`"strict": true` in tsconfig.json)
+- Type checking enforced via React Router's `tsc` command
+- No TypeScript suppressions (`@ts-ignore`) found in codebase
 
 ## Import Organization
 
 **Order:**
-1. Node.js runtime modules (`node:fs`, `node:path`, etc.)
-2. Third-party modules (`react`, `react-router`, `lucide-react`, etc.)
-3. Type imports with explicit `type` keyword
-4. Relative imports using `~/` alias (`~/components/`, `~/utils/`, `~/types/`)
-5. Local relative paths (rare; prefer `~/` alias)
+1. Node.js imports (`node:fs`, `node:path`, `node:os`)
+2. Third-party packages (`react`, `react-router`, `lucide-react`, `nanoid`)
+3. Type imports (`import type { ... }`)
+4. Local app imports using path aliases (`~/utils/`, `~/components/`, `~/types/`)
+5. `.server` module imports within server contexts only
 
 **Path Aliases:**
-- `~/` maps to `app/` directory per `tsconfig.json`
-- Used consistently for imports across all routes and components
+- `~/` maps to `./app/` directory
+- Used consistently across all files for relative imports within app
 
-**Example Order:**
-```typescript
-// Node.js
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
-
-// Third-party
-import { useState, useRef } from "react";
-import { Link } from "react-router";
-
-// Types
-import type { Route } from "./+types/kanban";
-import type { KanbanStory, KanbanStatus } from "~/types/kanban";
-
-// Relative (~/alias)
-import { KanbanColumn } from "~/components/KanbanColumn";
-import { KANBAN_DISPLAY_COLUMNS } from "~/types/kanban";
-```
-
-## React Router 7 SSR Rules
-
-**CRITICAL: Dynamic imports for server modules:**
-- Node.js modules MUST be dynamically imported inside loader/action functions
-- Top-level imports of `node:*` modules in `.tsx` routes cause "externalized for browser compatibility" errors
-- All server-side file I/O, child processes, and `.server.ts` imports must use `await import()`
-
-**Example (CORRECT):**
-```typescript
-export async function loader() {
-  const { getKanbanState } = await import("~/utils/kanban.server");
-  const state = await getKanbanState();
-  return { state };
-}
-```
-
-**Example (WRONG - will break client nav):**
-```typescript
-import { getKanbanState } from "~/utils/kanban.server"; // ❌ Top-level import
-
-export async function loader() {
-  const state = await getKanbanState();
-  return { state };
-}
-```
+**Server Module Imports (Critical):**
+- Node.js modules (`node:*`) MUST be dynamically imported inside `loader()` or `action()` functions
+- Top-level imports of Node.js modules in `.tsx` route files cause "externalized for browser compatibility" errors
+- Server-only modules (`.server.ts`) can be top-level imported in other server files
+- Example: `const { getKanbanState } = await import("~/utils/kanban.server");` inside loader
 
 ## Error Handling
 
 **Patterns:**
-- Try/catch blocks used for async file operations
-- Fallback returns on error (e.g., `return false` for optional checks, `return []` for lists)
-- Error messages attach context: `Failed to read directory: ${(error as Error).message}`
-- Custom error responses in actions: `{ error: "descriptive message" }`
-- Console.error for non-critical issues (e.g., failed project reads)
+- Try-catch blocks with silent failure when parsing JSON lines (common in JSONL file reading)
+- Catch handlers usually skip invalid entries with `// Skip invalid JSON lines` comments
+- Console.error() for logging failures (e.g., `console.error('Failed to get preview for session:', error)`)
+- Graceful degradation: return fallback values or defaults instead of throwing
+- For file operations: return empty arrays or null values on error
+- For network/parsing errors: return `null` or empty record `{}`
 
-**Example:**
+**Specific patterns observed:**
 ```typescript
 try {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  // process
+  // risky operation
 } catch (error) {
-  return {
-    dir,
-    projects: [],
-    error: `Failed to read directory: ${(error as Error).message}`,
-  };
+  // Skip silently or log and continue
+  console.error(`Failed to read ${item}:`, error);
 }
 ```
 
-**Route error boundary:**
-- Uses `isRouteErrorResponse()` to distinguish HTTP errors from JS errors
-- Shows 404-specific message for missing pages
-- Dev mode shows full stack trace; production shows generic message
+- Type guards for error handling: `(error as Error).message`
+- Optional chaining used to avoid null errors: `message?.content?.text`
+- Default values with nullish coalescing: `scale?.greenMax ?? 0.5`
 
 ## Logging
 
-**Framework:** `console` (standard Node.js + browser console)
+**Framework:** `console` (no logging library)
 
 **Patterns:**
-- `console.error()` for runtime errors with context
-- Used sparingly; logs only failures, not success paths
-- Error messages include operation context (e.g., "Failed to read project X")
-
-**When to log:**
-- File system operation failures
-- Async errors that don't throw
-- Skipped/skippable processing (not errors)
+- `console.error()` for errors with context (e.g., `console.error('Failed to get preview for session', sessionId, error)`)
+- Used sparingly - mostly in error paths
+- Messages include context about what failed
 
 ## Comments
 
 **When to Comment:**
-- Section markers for major JSX sections (e.g., `{/* Toolbar */}`, `{/* Column header */}`)
-- Inline logic explanation for complex filtering/calculations
-- Type definitions have JSDoc-style comments explaining domain concepts
+- Above complex logic blocks explaining intent (e.g., "// Replace newlines with spaces")
+- At top of `.server.ts` files explaining purpose
+- Type comments for Record objects explaining key-value meaning
+- Inline comments for non-obvious transformations
 
 **JSDoc/TSDoc:**
-- Used for type definitions to explain business domain
-- Comments describe "what" for types, not "how"
-
-**Example:**
+- Used for exported functions in `.server.ts` modules
+- Describe parameters and return types
+- Mark async functions clearly
+- Example:
 ```typescript
 /**
- * Kanban column statuses
+ * Check if a session was started with haiku model
+ * Returns true if the first assistant message used haiku
  */
-export type KanbanStatus = "archive" | "back-log" | "in-progress" | "discard" | "complete";
-
-/** Kanban story = project + branch combination */
-export type KanbanStory = {
-  /** Title - defaults to branch name, user-editable */
-  title: string;
-};
+export async function isHaikuSession(project: string, sessionId: string): Promise<boolean> {
 ```
 
 ## Function Design
 
-**Size:** Typically 30-80 lines; larger functions decomposed into helper functions
+**Size:**
+- Most functions 10-40 lines
+- Larger functions (50+ lines) used for complex file parsing logic with multiple try-catch blocks
+- Preference for smaller utility functions that compose together
 
 **Parameters:**
-- Props passed as object with destructuring in function signature
-- Optional handlers use optional chaining: `onStoryMove?.(storyId, status)`
-- Event parameters typed with React types: `React.DragEvent`, `React.MouseEvent`, `React.KeyboardEvent`
+- Destructured object parameters for components (Props type interface)
+- Positional parameters for pure utility functions
+- Named exports for all public functions
+- Rest parameters not commonly used
 
 **Return Values:**
-- Component functions return JSX
-- Utility functions return typed objects or primitive values
-- Async functions explicitly typed as `Promise<T>`
-
-**Example:**
-```typescript
-export function KanbanBoard({ state, projects, onStoryMove, isSyncing }: Props) {
-  // ~50 lines of implementation
-}
-
-async function getProjects(): Promise<{ dir: string; projects: Project[] }> {
-  // implementation
-}
-```
+- Explicit return types on all exported functions
+- Union types for error states: `SessionPreview | null`
+- Promises explicitly typed: `Promise<KanbanState>`
+- Component functions return JSX elements
 
 ## Module Design
 
 **Exports:**
-- Single default export for React components: `export default function App()`
-- Named exports for utilities and types: `export function formatUSD()`, `export type KanbanStory = ...`
-- All types use named exports
+- Named exports for functions and types (not default exports)
+- Type exports use `export type` syntax
+- Barrel files not used - direct imports from source files
 
-**Server-only modules:**
-- Files ending in `.server.ts` contain only server code
-- No top-level Node.js imports in `.tsx` files
-
-**Type organization:**
-- Type definitions live in `app/types/` directory
-- Constants (like `KANBAN_COLUMNS`) exported from type files
-- Factory functions (like `createEmptyKanbanState()`) in type files for complex setup
-
-## Conditional Rendering
-
-**Pattern:** Ternary for binary choices, logical && for optional rendering
-
-**Examples:**
-```typescript
-// Binary - use ternary
-{isDragOver ? "border-blue-500" : "border-gray-700"}
-
-// Optional - use logical &&
-{searchQuery && (
-  <button onClick={() => setSearchQuery("")}>✕</button>
-)}
-```
-
-## Array/Object Operations
-
-**Patterns:**
-- `.map()` for iteration with keys in lists
-- `.filter()` for filtering with memoization via `useMemo()`
-- Spread operator for immutable updates: `[...stories].sort()`
-- Destructuring for object access in handler parameters
-
-**Example (immutable update):**
-```typescript
-const sortedStories = [...stories].sort((a, b) => a.order - b.order);
-```
-
-## Accessibility
-
-**Patterns:**
-- `title` attributes on buttons and links for hover tooltips
-- `role` attributes used with testing tools (e.g., `getByRole('link')`)
-- `onClick` handlers include `e.stopPropagation()` to prevent bubbling
-- Semantic HTML (buttons vs divs, links for navigation)
+**File Scope:**
+- Functions prefixed with module purpose (e.g., `getSessionPreview`, `getProjects`)
+- State factory functions: `createEmptyKanbanState()`
+- Each file focuses on a single responsibility
 
 ---
 
-*Convention analysis: 2026-01-25*
+*Convention analysis: 2026-01-26*

@@ -1,178 +1,191 @@
 # Architecture
 
-**Analysis Date:** 2026-01-25
+**Analysis Date:** 2026-01-26
 
 ## Pattern Overview
 
-**Overall:** React Router 7 full-stack SSR (Server-Side Rendering) with file-based routing
+**Overall:** React Router 7 full-stack application with server-side rendering (SSR), file-based routing, and server modules for Node.js operations.
 
 **Key Characteristics:**
-- Server-driven data loading via loaders & actions
-- Dynamic imports for Node.js modules (critical SSR pattern)
-- Multi-route system with API endpoints + UI routes
-- File system as primary data source (no database)
-- Kanban-based session organization overlay
+- Full-stack React with TypeScript
+- Server-side rendering via React Router 7 with SSR enabled
+- File-based routing using `@react-router/fs-routes`
+- Server modules (`.server.ts`) for Node.js-only code
+- Dynamic imports in loaders/actions to prevent Node modules in client bundle
+- Vite 6 for build tooling with TailwindCSS v4
+- Filesystem-based data source (Claude Code sessions from `~/.claude/projects`)
 
 ## Layers
 
-**Presentation Layer (UI):**
-- Purpose: Render interactive components for browsing and organizing Claude Code sessions
-- Location: `app/routes/*.tsx` (page components), `app/components/*.tsx` (reusable UI)
-- Contains: React components with hooks, forms using React Router, markdown rendering
-- Depends on: React Router (navigation, fetchers), utils (formatting), types
-- Used by: Browser clients via React Router SSR
+**Presentation Layer (UI Components):**
+- Purpose: Render user interface, handle client-side interactions
+- Location: `app/components/`, `app/welcome/`, route files (`app/routes/`)
+- Contains: React components, hooks, layout components
+- Depends on: Type definitions, utilities for formatting/logic
+- Used by: Browser clients via SSR-rendered HTML
 
-**API Layer (Routes):**
-- Purpose: Handle HTTP requests for data operations and state mutations
-- Location: `app/routes/api.*.ts` (loaders & actions)
-- Contains: Loader functions (GET), action functions (POST/PATCH), response formatting
-- Depends on: Server utilities, file system access, path safety validation
-- Used by: Frontend components via Form/useFetcher, direct HTTP requests
+**Route Layer (Router & Actions/Loaders):**
+- Purpose: Define application routing, handle form submissions, fetch data server-side
+- Location: `app/routes/` with file-based naming (e.g., `_index.tsx`, `$project.sessions._index.tsx`)
+- Contains: Route components, loader/action functions, meta exports
+- Depends on: Server modules for data access, React Router APIs
+- Used by: React Router for navigation and data loading
 
-**Data Access Layer (Server Utilities):**
-- Purpose: Encapsulate file system operations and business logic
-- Location: `app/*.server.ts`, `app/utils/*.server.ts`
-- Contains: Functions for reading sessions, projects, kanban state; parsing JSONL files
-- Depends on: Node.js file system APIs, path resolution, data types
-- Used by: Route loaders/actions
+**Server Module Layer (Node.js Operations):**
+- Purpose: Encapsulate server-only logic for filesystem, process, and external CLI access
+- Location: `app/*.server.ts` files (e.g., `projects.server.ts`, `sessions.server.ts`)
+- Contains: Functions for reading projects/sessions, calling external CLIs, kanban state management
+- Depends on: Node.js stdlib (fs, path, os, child_process, util)
+- Used by: Loaders, actions, and other server modules
 
-**Type System:**
-- Purpose: Define data structures for sessions, projects, kanban stories
-- Location: `app/types/kanban.ts` (primary), inline types in route files
-- Contains: TypeScript interfaces for KanbanState, KanbanStory, SessionPreview
-- Depends on: None (standalone type definitions)
-- Used by: All layers for type safety
+**API Routes:**
+- Purpose: Provide JSON endpoints for client-side data fetching and operations
+- Location: `app/routes/api.*` files (REST-style routing)
+- Contains: Loaders that return `Response.json()`, server-side calculations
+- Depends on: Server modules, utilities
+- Used by: Client-side code via `fetch()`
 
-**Utility Layer:**
-- Purpose: Shared formatting, path safety, file tailing, CLI integration
-- Location: `app/utils/` (format.ts, path-safety.server.ts, file-tail.server.ts, kanban.ts)
-- Contains: Cost formatting, color gradients, path validation, file tail monitoring
-- Depends on: Standard library, third-party libs (ccusage)
-- Used by: All layers
+**Utilities Layer:**
+- Purpose: Reusable functions and formatters used across layers
+- Location: `app/utils/` and `app/types/`
+- Contains: Formatting (USD, colors), path safety validation, kanban logic, file utilities
+- Depends on: None
+- Used by: Components, routes, server modules
 
 ## Data Flow
 
-**Session Listing Flow:**
+**Project List View:**
+1. User navigates to `/` home page
+2. Router loader (`app/routes/_index.tsx`) calls `getProjects()` from `app/projects.server.ts`
+3. `getProjects()` reads `~/.claude/projects` directory, scans `.jsonl` files, extracts metadata
+4. Loader returns project list to component
+5. Component renders project table with links
+6. Client-side effect fetches project costs via `/api/sessions/costs` endpoint
+7. Costs are displayed with dynamic color scaling based on distribution
 
-1. User navigates to `/project/:project/sessions`
-2. Route loader (`$project.sessions._index.tsx`) imports `path-safety.server` & `fs/promises`
-3. Loader reads `.jsonl` files from `~/.claude/projects/:project/`
-4. Files are sorted by mtime, formatted with `sessions.server.ts` preview extraction
-5. Component receives `sessions` data, renders sorted list with filtering
-6. User clicks session → navigates to `/project/:project/sessions/:sessionId`
+**Session Detail View:**
+1. User clicks project, navigates to `/$project/sessions`
+2. Loader (`app/routes/$project.sessions._index.tsx`) reads session files from project directory
+3. Returns session list with file metadata (id, modified time)
+4. Component renders sessions, loads previews client-side
+5. User clicks session, navigates to `/$project/sessions/$sessionId`
+6. Detail loader (`app/routes/$project.sessions.$sessionId.tsx`) streams session file
+7. Component displays messages with filtering and rendering
 
-**Session Detail View Flow:**
+**Kanban Board State Management:**
+1. User navigates to `/kanban`
+2. Loader reads kanban state from `~/.claude/cc-viz/kanban.json`
+3. Component renders Kanban columns with stories (project + branch combinations)
+4. User actions (move, edit, archive) submit forms to route action
+5. Action updates state via kanban utilities, saves to disk
+6. Revalidator refreshes loader data, UI updates
 
-1. Route loader (`$project.sessions.$sessionId.tsx`) reads full session file
-2. File parsed line-by-line as JSONL (one JSON object per line)
-3. Component maintains client state: search query, sort direction, selected message type
-4. User can filter messages, view file contents (action: readFile), cancel session
-5. Real-time updates via poll to `/api/sessions/:project/:sessionId/active`
-
-**Kanban Board Flow:**
-
-1. `/kanban` loader calls `getKanbanState()` (reads `~/.claude/cc-viz/kanban.json`)
-2. State contains stories (project+branch combinations) across 5 statuses
-3. Component renders 4 visible columns (excludes archive)
-4. Drag/drop UI sends intent to action (move, updateTitle, updatePRLink, archive)
-5. Action calls server util functions (updateStoryStatus, updateStoryTitle, etc.)
-6. Updated state persisted back to disk
+**Session-to-Story Sync:**
+1. User clicks "Sync" on Kanban board
+2. Route action calls `syncSessionsToStories()` from `app/utils/kanban.server.ts`
+3. Sync reads all sessions across all projects
+4. Groups sessions by project + git branch
+5. Creates story per unique project+branch combination
+6. Generates AI names for sessions using Claude CLI
+7. Detects PR links using `gh` CLI
+8. Saves state split across two files: `kanban.json` (active) and `kanban-archive.json` (archived)
 
 **State Management:**
-- Client-side: React hooks (useState) for UI state (search, filters, editing)
-- Server-side: JSON files on disk (`~/.claude/cc-viz/kanban.json`, `~/.claude/cc-viz/kanban-archive.json`)
-- No in-memory cache; fresh reads from disk on every load
-- Optimistic UI updates via useFetcher + Form
+- Project/session metadata: Read-only from filesystem, cached in loader
+- Kanban state: Read/written to JSON files in `~/.claude/cc-viz/`
+- Client state: React hooks for search, filters, modal state (not persisted)
+- Cost calculations: Computed on-demand via ccusage library
 
 ## Key Abstractions
 
-**Session (Core Domain Model):**
-- Purpose: Represents one Claude Code session conversation
-- Examples: `app/sessions.server.ts`, `app/routes/$project.sessions.$sessionId.tsx`
-- Pattern: JSONL file format (one entry = one message), parsed on-demand, immutable source
-- Entry types: human, assistant, text, command, environment_details, tool_response, summary
+**KanbanStory:**
+- Purpose: Represents a project + branch combination as a single work item
+- Examples: `app/types/kanban.ts` defines `KanbanStory` type
+- Pattern: Immutable update functions (`updateStoryStatus`, `updateStoryTitle`) in `app/utils/kanban.server.ts`
 
-**Project (Container):**
-- Purpose: Groups related sessions by project name
-- Examples: `app/projects.server.ts`, route param `:project`
-- Pattern: Directory in `~/.claude/projects/:project/`, scanned for `.jsonl` files
-- Isolated sessions; no cross-project references
+**SessionPreview:**
+- Purpose: Lightweight summary of session content (last message, branch, timestamp)
+- Examples: `app/sessions.server.ts` exports `getSessionPreview()`
+- Pattern: Lazy-loaded client-side or fetched via API
 
-**KanbanStory (Organization Model):**
-- Purpose: Groups sessions by project + git branch, organizes with status workflow
-- Examples: `app/types/kanban.ts`, `app/utils/kanban.server.ts`
-- Pattern: Immutable records in JSON state file, updated atomically
-- Statuses: back-log, in-progress, discard, complete, archive
+**Path Safety:**
+- Purpose: Validate and resolve project/session paths to prevent directory traversal
+- Examples: `app/utils/path-safety.server.ts` exports `resolveSessionFile()`, `resolveProjectDir()`
+- Pattern: URL-encoded project names, validated base directory checks
 
-**FileReadRequest (Security Boundary):**
-- Purpose: Safely resolve relative file paths within session's working directory
-- Examples: `app/utils/path-safety.server.ts`, action in `$project.sessions.$sessionId.tsx`
-- Pattern: Validate path segments, prevent directory traversal, enforce 1MB size limit
-- Used for: File viewer feature, reading project files referenced in session
+**Cost Calculation:**
+- Purpose: Compute USD cost per session using Claude API pricing
+- Examples: `app/routes/api.sessions.costs.ts` uses `ccusage` library
+- Pattern: Dynamic scaling based on percentiles (p50=green, p90=yellow, p99=red)
 
 ## Entry Points
 
-**Web Application Root:**
-- Location: `app/root.tsx`
-- Triggers: App startup, page load
-- Responsibilities: Layout wrapper, font links, navigation shell (mobile/desktop nav), error boundary
-
-**Home Page:**
+**Home Route:**
 - Location: `app/routes/_index.tsx`
-- Triggers: GET `/`, user navigates to home
-- Responsibilities: List all projects, show last activity + cost, form to create new session
+- Triggers: Navigation to `/`
+- Responsibilities: Load projects from filesystem, render project list, handle new session creation
 
-**Project Sessions List:**
-- Location: `app/routes/$project.sessions._index.tsx`
-- Triggers: GET `/:project/sessions`
-- Responsibilities: List sessions for a project, filter by git branch, sort by mtime
-
-**Session Detail View:**
-- Location: `app/routes/$project.sessions.$sessionId.tsx`
-- Triggers: GET `/:project/sessions/:sessionId`
-- Responsibilities: Parse and render full session, support filtering + searching, file viewing
-
-**Kanban Board:**
+**Kanban Board Route:**
 - Location: `app/routes/kanban.tsx`
-- Triggers: GET `/kanban`
-- Responsibilities: Load kanban state, render columns, handle drag/drop + CRUD operations
+- Triggers: Navigation to `/kanban`
+- Responsibilities: Load kanban state, render board, handle story operations, sync sessions
 
-**API Routes (Data Operations):**
-- `app/routes/api.kanban.state.ts` - GET/POST full kanban state
-- `app/routes/api.kanban.stories.$storyId.ts` - PATCH story fields
-- `app/routes/api.sessions.costs.ts` - GET aggregated session costs
-- `app/routes/api.sessions.$project.$sessionId.active.ts` - Check if session is actively running
-- `app/routes/api.sessions.$project.$sessionId.stream.ts` - SSE stream for real-time updates
+**Session Detail Route:**
+- Location: `app/routes/$project.sessions.$sessionId.tsx`
+- Triggers: Navigation to `/:project/sessions/:sessionId`
+- Responsibilities: Stream session file, render messages with filtering and markdown
+
+**API Routes (Server-only):**
+- `app/routes/api.sessions.costs.ts` - Fetch project/session costs
+- `app/routes/api.sessions.previews.ts` - Fetch session previews
+- `app/routes/api.kanban.state.ts` - Kanban state operations
+- Other API routes handle specific session operations
+
+**Server Modules (Utilities):**
+- `app/projects.server.ts` - List projects from filesystem
+- `app/sessions.server.ts` - Read session previews
+- `app/utils/kanban.server.ts` - All kanban logic (sync, state management)
+- `app/claude-cli.server.ts` - Claude CLI integration
 
 ## Error Handling
 
-**Strategy:** Server-side try/catch, return JSON error responses or React Router error boundaries
+**Strategy:** Graceful degradation with fallbacks
 
 **Patterns:**
-- **Loader errors:** Caught in route loader, render via `ErrorBoundary` or meta function
-- **Action errors:** POST/PATCH handlers catch exceptions, return `{ error: message }` in JSON
-- **File access:** Non-critical errors (stat, read) caught and handled gracefully (return empty, return false)
-- **Path validation:** Pre-flight checks in `path-safety.server` throw errors with clear messages
-- **Type safety:** TypeScript enforces correct loader/action argument types via React Router code generation
+- Loaders return partial data on error (e.g., empty array + error message)
+- API routes return 400/500 JSON with error field
+- Components display error messages or skeleton loaders
+- File read failures (sessions) don't crash; skip invalid entries
+- JSON parse failures on JSONL files are caught and ignored per-line
+- Missing directories default to empty lists rather than throwing
 
 ## Cross-Cutting Concerns
 
-**Logging:** `console.log` used for debugging in actions/loaders (see `_index.tsx` action for examples)
+**Logging:**
+- Console.log for development (visible in server logs)
+- No structured logging; minimal production logging
+- Kanban sync operations log counts and progress
 
 **Validation:**
-- Route params: Validated by React Router type generation
-- File paths: `path-safety.server` validates segments before filesystem access
-- State updates: Type-safe via TypeScript; no runtime validators
+- Path safety: `resolveSessionFile()` and `resolveProjectDir()` validate inputs
+- Form submissions: TypeScript type guards on form data
+- Session files: JSONL lines parsed individually; invalid entries skipped
 
-**Authentication:** None (local file system only, assumes trusted user environment)
+**Authentication:**
+- None; reads from local filesystem only
+- No user accounts or permissions
+- Desktop application model (local data access)
 
-**Authorization:** N/A (single-user app reading local files)
+**Markdown Rendering:**
+- `react-markdown` component in session detail view
+- Supports code blocks with syntax highlighting via `react-syntax-highlighter` (implicit dependency)
+- Sanitization via `react-markdown` defaults
 
-**Performance Optimization:**
-- File reading: Only when needed (lazy in loaders), cached in component state
-- Rendering: useMemo for filtered story lists, prevents unnecessary re-renders
-- Kanban: Stories excluded from archive in display (filtered out via useMemo)
+**State Persistence:**
+- Kanban state: Explicitly saved to `~/.claude/cc-viz/kanban.json`
+- Session metadata: Read from project session files only
+- No local storage except browser localStorage for UI preferences (e.g., adaptive colors)
 
 ---
 
-*Architecture analysis: 2026-01-25*
+*Architecture analysis: 2026-01-26*
