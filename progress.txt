@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-01-26 - Phase 01: SQLite Database (Task 5/9)
+
+- Created app/db/queries.server.ts - Drizzle query helpers
+- Functions: getAllStories, getStoryById, createStory, updateStory, archiveStory, etc.
+- Files changed: app/db/queries.server.ts
+- **Learnings:**
+  - Drizzle's `eq`, `and`, `sql` from drizzle-orm for query building
+  - NULL comparisons: `sql\`${table.field} IS NULL\`` not `eq(table.field, null)`
+  - `onConflictDoUpdate` for upsert: `db.insert(table).values(...).onConflictDoUpdate(...)`
+  - Transaction-like ops: sequential inserts/deletes for archive moves
+  - Type inference from existing types: `KanbanStory` from ~/types/kanban.ts
+
+---
+
 ## 2026-01-26 - Phase 01: SQLite Database (Task 3/9)
 
 - Created app/db/index.server.ts - DB singleton with WAL mode
