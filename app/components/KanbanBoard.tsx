@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { KanbanColumn } from "./KanbanColumn";
+import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { KanbanStory, KanbanState, KanbanStatus } from "~/types/kanban";
 import { KANBAN_DISPLAY_COLUMNS } from "~/types/kanban";
 
@@ -19,6 +20,21 @@ export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRL
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [draggedStory, setDraggedStory] = useState<KanbanStory | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanStatus | null>(null);
+  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
+
+  // Get selected story from state
+  const selectedStory = useMemo(() => {
+    if (!selectedStoryId) return null;
+    return state.stories.find((s) => s.id === selectedStoryId) || null;
+  }, [selectedStoryId, state.stories]);
+
+  const handleStorySelect = (storyId: string) => {
+    setSelectedStoryId(storyId);
+  };
+
+  const handlePanelClose = () => {
+    setSelectedStoryId(null);
+  };
 
   // Filter stories by search and project (exclude archived)
   const filteredStories = useMemo(() => {
@@ -183,6 +199,15 @@ export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRL
           />
         ))}
       </div>
+
+      {/* Story Detail Panel */}
+      <StoryDetailPanel
+        story={selectedStory}
+        onClose={handlePanelClose}
+        onTitleChange={onTitleChange}
+        onPRLinkChange={onPRLinkChange}
+        onArchive={onArchive}
+      />
     </div>
   );
 }

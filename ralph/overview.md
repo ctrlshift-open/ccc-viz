@@ -1,8 +1,8 @@
-# AI-Generated Kanban Card Titles
+# Kanban Story Detail Slide-Over Panel
 
 ## Scope
 
-Enhance kanban cards with AI-generated titles using Claude CLI with haiku model. Titles generated from session content (user prompts + assistant responses).
+Add a slide-over detail panel on the right side of the kanban board. Clicking a card selects it and opens the panel with full story details, vertical scrolling, and text wrapping. Cards remain compact.
 
 ---
 
@@ -10,10 +10,10 @@ Enhance kanban cards with AI-generated titles using Claude CLI with haiku model.
 
 | Phase | Name | Status | Bean ID |
 |-------|------|--------|---------|
-| 01 | Core AI Title Generation | completed | ccc-viz-l7gt |
-| 02 | Apply During Card Creation | completed | ccc-viz-w2eu |
-| 03 | Single Card Regeneration | completed | ccc-viz-fzve |
-| 04 | CLI Migration Script | completed | ccc-viz-tajp |
+| 01 | Create StoryDetailPanel Component | completed | ccc-viz-yob3 |
+| 02 | Add Selection State to KanbanBoard | completed | ccc-viz-w651 |
+| 03 | Update KanbanColumn Props | todo | ccc-viz-w931 |
+| 04 | Update StoryCard Selection | todo | ccc-viz-8r2o |
 
 Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title status } }'`
 
@@ -22,10 +22,10 @@ Query phases: `beans query '{ beans(filter: { search: "Phase" }) { id title stat
 ## Dependencies
 
 ```
-Phase 01 (Core AI Title Generation)
-    ├── Phase 02 (Apply During Card Creation)
-    ├── Phase 03 (Single Card Regeneration)
-    └── Phase 04 (CLI Migration Script)
+Phase 01 (Create StoryDetailPanel Component)
+    └── Phase 02 (Add Selection State to KanbanBoard)
+        └── Phase 03 (Update KanbanColumn Props)
+            └── Phase 04 (Update StoryCard Selection)
 ```
 
 ---
@@ -45,4 +45,3 @@ Phase 01 (Core AI Title Generation)
 ## Related Docs
 
 - [CLAUDE.md](../CLAUDE.md) - Project guidance
-

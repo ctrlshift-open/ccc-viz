@@ -6,6 +6,18 @@
 - CSS animations: custom keyframes in app.css, use `animate-` prefix for animation classes
 - Panel pattern: fixed position + backdrop + body scroll lock + escape key handler
 
+- Selection state pattern: useState for ID, useMemo to derive full object from state
+
+---
+
+## 2026-01-26 - Phase 02 (ccc-viz-w651)
+
+- Added selection state and panel rendering to KanbanBoard
+- Files changed: app/components/KanbanBoard.tsx
+- **Learnings:**
+  - Keep state minimal (ID only), derive full object via useMemo
+  - Props for KanbanColumn deferred to Phase 03
+
 ---
 
 ## 2026-01-26 - Phase 01 (ccc-viz-yob3)
