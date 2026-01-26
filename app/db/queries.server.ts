@@ -4,7 +4,7 @@
  */
 
 import { eq, and, desc, asc, inArray, ne, sql } from "drizzle-orm";
-import { getDb } from "./index.server";
+import { getDb, getSqliteDb } from "./index.server";
 import {
   stories,
   sessions,
@@ -327,13 +327,15 @@ export function deleteSession(sessionId: string): boolean {
 // ============================================
 
 /**
- * Archive a story - moves to archive tables in a transaction
+ * Archive a story - moves to archive tables atomically in a transaction
+ * Uses better-sqlite3 transaction for atomicity
  */
 export function archiveStory(storyId: string): boolean {
   const db = getDb();
+  const sqliteDb = getSqliteDb();
   const now = new Date().toISOString();
 
-  // Get the story
+  // Get the story first (outside transaction to check existence)
   const story = db.select().from(stories).where(eq(stories.id, storyId)).get();
   if (!story) return false;
 
@@ -344,34 +346,38 @@ export function archiveStory(storyId: string): boolean {
     .where(eq(sessions.storyId, storyId))
     .all();
 
-  // Use a transaction
-  const sqliteDb = (db as any).session; // Access underlying better-sqlite3
+  // Use better-sqlite3 transaction for atomicity
+  const archiveTransaction = sqliteDb.transaction(() => {
+    // 1. Insert story into archive table
+    db.insert(storiesArchive)
+      .values({
+        ...story,
+        archivedAt: now,
+      })
+      .run();
 
-  // Insert into archive tables and delete from active
-  db.insert(storiesArchive)
-    .values({
-      ...story,
-      archivedAt: now,
-    })
-    .run();
+    // 2. Insert sessions into archive table
+    for (const session of sessionRows) {
+      db.insert(sessionsArchive).values(session).run();
+    }
 
-  for (const session of sessionRows) {
-    db.insert(sessionsArchive).values(session).run();
-  }
+    // 3. Delete from active tables (sessions cascade deleted via FK)
+    db.delete(stories).where(eq(stories.id, storyId)).run();
 
-  // Delete from active tables (sessions cascade deleted)
-  db.delete(stories).where(eq(stories.id, storyId)).run();
-
-  // Reorder remaining stories in the column
-  db.update(stories)
-    .set({ order: sql`${stories.order} - 1` })
-    .where(
-      and(
-        eq(stories.status, story.status),
-        sql`${stories.order} > ${story.order}`
+    // 4. Reorder remaining stories in the column
+    db.update(stories)
+      .set({ order: sql`${stories.order} - 1` })
+      .where(
+        and(
+          eq(stories.status, story.status),
+          sql`${stories.order} > ${story.order}`
+        )
       )
-    )
-    .run();
+      .run();
+  });
+
+  // Execute the transaction
+  archiveTransaction();
 
   return true;
 }

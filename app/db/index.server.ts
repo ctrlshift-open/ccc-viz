@@ -118,6 +118,17 @@ export function closeDb() {
 }
 
 /**
+ * Get the underlying better-sqlite3 database instance
+ * Needed for transaction support
+ */
+export function getSqliteDb() {
+  if (!sqliteDb) {
+    getDb(); // Initialize if not already done
+  }
+  return sqliteDb!;
+}
+
+/**
  * Get the database path
  */
 export function getDbPath() {

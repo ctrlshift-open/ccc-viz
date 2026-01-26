@@ -13,6 +13,19 @@
 
 ---
 
+## 2026-01-26 - Phase 03: Archive Tables (Tasks 1-2)
+
+- Refactored archiveStory() to use proper SQLite transaction via better-sqlite3
+- Added getSqliteDb() export to index.server.ts for transaction access
+- Transaction wraps: insert story archive, insert session archives, delete from active, reorder remaining
+- Files changed: app/db/queries.server.ts, app/db/index.server.ts
+- **Learnings:**
+  - better-sqlite3 `db.transaction()` returns a function that executes atomically
+  - Drizzle doesn't expose transaction API directly for better-sqlite3 - use underlying DB
+  - Pattern: `const txn = sqliteDb.transaction(() => {...}); txn();`
+
+---
+
 ## 2026-01-26 - Phase 02: File Watcher (All Tasks - COMPLETE)
 
 - Added chokidar 5.0.0 for file watching
