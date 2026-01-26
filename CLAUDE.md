@@ -48,6 +48,13 @@ pnpm bg:stop      # Stop background server
 - **Kanban utils**: `app/utils/kanban.server.ts` wraps DB queries with business logic (sync, session detection)
 - **Migration**: Run `pnpm migrate:json-to-sqlite` to migrate from JSON files (one-time)
 
+### File Watcher (Real-time Session Detection)
+- **Watcher**: `app/utils/session-watcher.server.ts` - Singleton chokidar watcher on `~/.claude/projects/**/*.jsonl`
+- **SSE endpoint**: `app/routes/api.kanban.watch.ts` - Streams watcher events to clients
+- **Client hook**: `app/hooks/useSessionWatcher.ts` - Subscribe to session:added/changed/removed events
+- **Integration**: Kanban board auto-syncs new sessions via `syncOneSession()` action
+- Chokidar imported via `require()` to avoid ESM/CJS type conflicts
+
 ### Native Module Builds (better-sqlite3)
 pnpm v10 requires explicit approval for native module build scripts. If better-sqlite3 bindings are missing:
 ```bash

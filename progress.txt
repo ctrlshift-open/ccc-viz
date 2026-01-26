@@ -8,6 +8,29 @@
 - DB queries: `~/db/queries.server.ts` (getAllStories, createStory, updateStory, archiveStory)
 - Kanban utils: `~/utils/kanban.server.ts` wraps DB with business logic
 - Native module builds: pnpm v10 ignores build scripts by default; manually build with `npm run build-release` in module dir
+- File watcher: chokidar singleton in `~/utils/session-watcher.server.ts`, SSE at `/api/kanban/watch`
+- Client hook: `~/hooks/useSessionWatcher.ts` for subscribing to session events
+
+---
+
+## 2026-01-26 - Phase 02: File Watcher (All Tasks - COMPLETE)
+
+- Added chokidar 5.0.0 for file watching
+- Created watcher-types.ts - Event definitions (session:added/changed/removed, watcher:ready/error)
+- Created session-watcher.server.ts - Singleton pattern with subscribe/unsubscribe
+- Created api.kanban.watch.ts - SSE endpoint streaming watcher events
+- Created useSessionWatcher.ts - React hook with EventSource connection
+- Integrated with kanban.tsx - Auto-sync new sessions via syncOneSession action
+- Added syncOneSession() to kanban.server.ts and kanban.tsx action
+- Files changed: package.json, app/utils/watcher-types.ts, app/utils/session-watcher.server.ts, app/routes/api.kanban.watch.ts, app/hooks/useSessionWatcher.ts, app/routes/kanban.tsx, app/utils/kanban.server.ts, CLAUDE.md
+- **Learnings:**
+  - Chokidar import via `require()` avoids ESM/CJS type conflicts in server modules
+  - `awaitWriteFinish: { stabilityThreshold: 500 }` prevents events during file writes
+  - `ignoreInitial: true` skips existing files on watcher start
+  - SSE pattern: `ReadableStream<Uint8Array>` with `TextEncoder` for event formatting
+  - EventSource auto-reconnects on error (built-in browser behavior)
+  - Use refs for callbacks in hooks to avoid reconnecting on callback changes
+  - parseSessionPath() helper extracts project/sessionId from file paths
 
 ---
 

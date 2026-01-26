@@ -46,6 +46,7 @@
     "@react-router/serve": "^7.7.1",
     "ansi_up": "^6.0.6",
     "ccusage": "^16.2.3",
+    "chokidar": "^5.0.0",
     "drizzle-orm": "^0.45.1",
     "isbot": "^5.1.27",
     "lucide-react": "^0.542.0",

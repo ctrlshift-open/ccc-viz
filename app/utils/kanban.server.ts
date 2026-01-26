@@ -387,3 +387,96 @@ export function updateStoryTitleDb(
 ): void {
   updateStory(storyId, { title, updatedAt: new Date().toISOString() });
 }
+
+/**
+ * Sync a single session to the kanban board
+ * Called when the file watcher detects a new session
+ * @returns true if session was added, false if skipped/exists
+ */
+export async function syncOneSession(
+  project: string,
+  sessionId: string
+): Promise<{ added: boolean; reason?: string }> {
+  console.log(`[kanban] Syncing single session: ${project}/${sessionId}`);
+
+  // Check if session already exists in DB
+  if (sessionExists(project, sessionId)) {
+    console.log(`[kanban] Session ${sessionId} already exists, skipping`);
+    return { added: false, reason: "exists" };
+  }
+
+  // Skip haiku sessions
+  if (await isHaikuSession(project, sessionId)) {
+    console.log(`[kanban] Session ${sessionId} is haiku, skipping`);
+    return { added: false, reason: "haiku" };
+  }
+
+  // Get session details from preview
+  const preview = await getSessionPreview(project, sessionId);
+  const gitBranch = preview?.gitBranch ?? null;
+
+  // Get file timestamp
+  const { file } = resolveSessionFile(project, sessionId);
+  let timestamp: string;
+  try {
+    const stats = await fs.stat(file);
+    timestamp = stats.mtime.toISOString();
+  } catch {
+    timestamp = new Date().toISOString();
+  }
+
+  // Find or create story for this project+branch
+  let story = getStoryByProjectBranch(project, gitBranch);
+  let createdNewStory = false;
+
+  if (!story) {
+    // Create new story
+    const prLink = gitBranch
+      ? await detectPRLink(project, gitBranch)
+      : null;
+
+    const now = new Date().toISOString();
+    createStory({
+      id: nanoid(10),
+      title: gitBranch ?? "No Branch",
+      project,
+      branch: gitBranch,
+      prLink,
+      status: "in-progress",
+      order: getNextOrder("in-progress"),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Refetch to get the full story
+    story = getStoryByProjectBranch(project, gitBranch);
+    createdNewStory = true;
+  }
+
+  if (!story) {
+    console.error(`[kanban] Failed to create/find story for ${project}/${gitBranch}`);
+    return { added: false, reason: "story_error" };
+  }
+
+  // Generate AI name for session
+  const sessionName = await generateSessionName(project, sessionId);
+
+  // Build session link
+  const link = `/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionId)}`;
+
+  // Create session in DB
+  createSession({
+    id: sessionId,
+    storyId: story.id,
+    name: sessionName,
+    timestamp,
+    link,
+  });
+
+  // Update story's updatedAt
+  updateStory(story.id, { updatedAt: new Date().toISOString() });
+
+  console.log(`[kanban] Added session ${sessionId} to story ${story.id}${createdNewStory ? " (new story)" : ""}`);
+
+  return { added: true };
+}

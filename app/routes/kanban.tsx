@@ -2,7 +2,9 @@ import type { Route } from "./+types/kanban";
 import { useLoaderData, useFetcher, useRevalidator } from "react-router";
 import { KanbanBoard } from "~/components/KanbanBoard";
 import type { KanbanStatus } from "~/types/kanban";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSessionWatcher } from "~/hooks/useSessionWatcher";
+import type { SessionAddedEvent } from "~/hooks/useSessionWatcher";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -91,6 +93,20 @@ export async function action({ request }: Route.ActionArgs) {
     return { success: true };
   }
 
+  if (intent === "syncOneSession") {
+    const project = formData.get("project");
+    const sessionId = formData.get("sessionId");
+
+    if (typeof project !== "string" || typeof sessionId !== "string") {
+      return { error: "Invalid syncOneSession request" };
+    }
+
+    const { syncOneSession } = await import("~/utils/kanban.server");
+    const result = await syncOneSession(project, sessionId);
+
+    return { success: true, ...result };
+  }
+
   return { error: "Unknown intent" };
 }
 
@@ -98,7 +114,36 @@ export default function Kanban() {
   const { state, projects } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   const syncFetcher = useFetcher();
+  const singleSessionFetcher = useFetcher();
   const revalidator = useRevalidator();
+  const [watcherConnected, setWatcherConnected] = useState(false);
+
+  // Subscribe to session file watcher
+  const watcherState = useSessionWatcher({
+    onSessionAdded: useCallback(
+      (event: SessionAddedEvent) => {
+        console.log("[kanban] Session added:", event.sessionId);
+        // Sync the single session that was added
+        singleSessionFetcher.submit(
+          {
+            intent: "syncOneSession",
+            project: event.project,
+            sessionId: event.sessionId,
+          },
+          { method: "post" }
+        );
+      },
+      [singleSessionFetcher]
+    ),
+    onReady: useCallback(() => {
+      console.log("[kanban] Watcher ready");
+      setWatcherConnected(true);
+    }, []),
+    onError: useCallback((error: string) => {
+      console.error("[kanban] Watcher error:", error);
+      setWatcherConnected(false);
+    }, []),
+  });
 
   // Track sync completion to trigger revalidation
   useEffect(() => {
@@ -106,6 +151,13 @@ export default function Kanban() {
       revalidator.revalidate();
     }
   }, [syncFetcher.state, syncFetcher.data, revalidator]);
+
+  // Revalidate when single session sync completes
+  useEffect(() => {
+    if (singleSessionFetcher.state === "idle" && singleSessionFetcher.data) {
+      revalidator.revalidate();
+    }
+  }, [singleSessionFetcher.state, singleSessionFetcher.data, revalidator]);
 
   const handleStoryMove = (storyId: string, newStatus: KanbanStatus) => {
     fetcher.submit(
