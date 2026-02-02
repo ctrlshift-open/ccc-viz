@@ -1963,6 +1963,51 @@ function EntryCard({
         );
       }
 
+      // Custom rendering for AskUserQuestion
+      const questions = Array.isArray(seg?.input?.questions) ? seg.input.questions : null;
+      if (name === "AskUserQuestion" && questions) {
+        return (
+          <div key={i} className="rounded border border-purple-800 bg-purple-950 p-2 sm:p-3 max-w-full overflow-x-hidden">
+            <div className="mb-2 flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1">
+                <span>❓</span>
+                <Pill tone="info">{name}</Pill>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {questions.map((q: any, j: number) => (
+                <div key={j} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {q.header && <Pill>{q.header}</Pill>}
+                  </div>
+                  <div className="text-sm text-gray-100 font-medium">{q.question}</div>
+                  <div className="ml-2 space-y-1.5">
+                    {(q.options || []).map((opt: any, k: number) => (
+                      <div key={k} className="flex items-start gap-2 text-sm">
+                        <span className="text-purple-400 mt-0.5">{q.multiSelect ? "☐" : "○"}</span>
+                        <div>
+                          <div className="text-gray-200">
+                            {opt.label?.includes("(Recommended)") ? (
+                              <>
+                                {opt.label.replace("(Recommended)", "")}
+                                <span className="text-green-400 text-xs ml-1">(Recommended)</span>
+                              </>
+                            ) : opt.label}
+                          </div>
+                          {opt.description && (
+                            <div className="text-xs text-gray-500">{opt.description}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       // Default tool_use rendering
       return (
         <div key={i} className="rounded border border-blue-800 bg-blue-950 p-2 sm:p-3">
