@@ -144,7 +144,25 @@ export async function loader({ params }: Route.LoaderArgs) {
       // continue without totals if ccusage not available
     }
 
-    return Response.json({ totalLines, categories, totals, messageCostScale });
+    // Read live metrics from sidecar file
+    let liveMetrics: {
+      model?: string | null;
+      cost_usd?: number;
+      session_duration_ms?: number;
+      api_duration_ms?: number;
+      context_remaining_pct?: number | null;
+      context_size?: number | null;
+      tokens?: { input?: number; output?: number; cache_creation?: number; cache_read?: number };
+    } | null = null;
+    try {
+      const metricsPath = file.replace('.jsonl', '.metrics.json');
+      const metricsContent = await readFile(metricsPath, 'utf-8');
+      liveMetrics = JSON.parse(metricsContent);
+    } catch {
+      // No metrics file - OK
+    }
+
+    return Response.json({ totalLines, categories, totals, messageCostScale, liveMetrics });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 500 });
   }

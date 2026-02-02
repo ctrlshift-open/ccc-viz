@@ -6,7 +6,8 @@ import { MessageTypeIcon, getMessageTypeIcon } from "~/components/MessageTypeIco
 import { CancelButton } from "~/components/CancelButton";
 import { FileViewer } from "~/welcome/FileViewer";
 import type { Route } from "./+types/$project.sessions.$sessionId";
-import { formatUSD, costColorHex } from "~/utils/format";
+import { formatUSD, costColorHex, formatDuration } from "~/utils/format";
+import { MODEL_OPTIONS, DEFAULT_MODEL, getModelEmoji, type ModelValue } from "~/utils/models";
 
 type ParsedLine =
   | { ok: true; value: unknown; line: number }
@@ -456,6 +457,24 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       // Continue without file list - not critical
     }
 
+    // Read live metrics from sidecar file (written by statusline hook)
+    let liveMetrics: {
+      model?: string | null;
+      cost_usd?: number;
+      session_duration_ms?: number;
+      api_duration_ms?: number;
+      context_remaining_pct?: number | null;
+      context_size?: number | null;
+      tokens?: { input?: number; output?: number; cache_creation?: number; cache_read?: number };
+    } | null = null;
+    try {
+      const metricsPath = file.replace('.jsonl', '.metrics.json');
+      const metricsContent = await readFile(metricsPath, 'utf-8');
+      liveMetrics = JSON.parse(metricsContent);
+    } catch {
+      // No metrics file or invalid JSON - that's OK
+    }
+
     return {
       baseDir,
       project,
@@ -469,6 +488,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       currentCtx: (globalThis as any)._ccvizCurrentCtx,
       modifiedMdFiles,
       workingDirectory,
+      liveMetrics,
     };
   } catch (error) {
     return {
@@ -482,6 +502,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       error: `Failed to read session: ${(error as Error).message}`,
       modifiedMdFiles: [],
       workingDirectory: "/",
+      liveMetrics: null,
     };
   }
 }
@@ -503,6 +524,7 @@ export default function SessionDetails() {
   const [totals, setTotals] = useState(data.totals);
   const [messageCostScale, setMessageCostScale] = useState(data.messageCostScale);
   const [currentCtx, setCurrentCtx] = useState<{ used: number; limit?: number; pct?: number } | undefined>((data as any).currentCtx);
+  const [liveMetrics, setLiveMetrics] = useState<typeof data.liveMetrics>(data.liveMetrics);
   type Cat = { key: string; label: string; count: number };
   const [catOptions, setCatOptions] = useState<Cat[]>(data.categories || []);
   const [metaTotal, setMetaTotal] = useState<number>(data.meta.total);
@@ -940,6 +962,7 @@ export default function SessionDetails() {
         if (d.messageCostScale) setMessageCostScale(d.messageCostScale);
         if (Array.isArray(d.categories)) setCatOptions(d.categories);
         if (d.currentCtx) setCurrentCtx(d.currentCtx);
+        if (d.liveMetrics) setLiveMetrics(d.liveMetrics);
       }
     }
   }, [totalsFetcher.state, totalsFetcher.data]);
@@ -952,30 +975,64 @@ export default function SessionDetails() {
       <p className="text-sm text-gray-500 mb-4 break-all">
         Project: <strong>{data.project}</strong> · Session: <strong>{data.sessionId}</strong>
       </p>
-      <div className="mb-3 text-sm text-gray-400 flex flex-wrap items-center gap-3">
+      {/* Mobile: compact single line */}
+      <div className="mb-3 text-[11px] text-gray-400 flex md:hidden items-center gap-1.5">
+        {liveMetrics?.model && (
+          <>
+            <span className="text-blue-400 font-medium">{liveMetrics.model.split(' ')[0]}</span>
+            <span className="text-gray-600">|</span>
+          </>
+        )}
+        <strong style={{ color: costColorHex(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined)}</strong>
+        {((currentCtx && typeof currentCtx.used === 'number') || liveMetrics?.context_size) && (
+          <>
+            <span className="text-gray-600">|</span>
+            <ContextDisplay currentCtx={currentCtx} liveMetrics={liveMetrics} compact />
+          </>
+        )}
+        {(liveMetrics?.session_duration_ms || liveMetrics?.api_duration_ms) && (
+          <>
+            <span className="text-gray-600">|</span>
+            <span>
+              s:{formatDuration(liveMetrics?.session_duration_ms)}
+              <span className="text-gray-600"> | </span>
+              {liveMetrics?.api_duration_ms ? <span className="text-cyan-500">a:{formatDuration(liveMetrics.api_duration_ms)}</span> : ''}
+            </span>
+          </>
+        )}
+      </div>
+      {/* Desktop: full details */}
+      <div className="mb-3 text-sm text-gray-400 hidden md:flex flex-wrap items-center gap-3">
         <span className="inline-flex items-center gap-2">
+          {liveMetrics?.model && (
+            <>
+              <span className="text-blue-400 font-medium">{liveMetrics.model}</span>
+              <span className="text-gray-600">|</span>
+            </>
+          )}
           <span>
-            Total cost: <strong style={{ color: costColorHex(totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(totals?.totalUSD as number | undefined)}</strong>
+            Total cost: <strong style={{ color: costColorHex(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined)}</strong>
           </span>
           <span className="text-gray-600">|</span>
           <span>
             tokens in {typeof totals?.inputTokens === "number" ? totals!.inputTokens : "—"}
             {" "}· out {typeof totals?.outputTokens === "number" ? totals!.outputTokens : "—"}
           </span>
-          {currentCtx && typeof currentCtx.used === 'number' ? (
+          {(currentCtx && typeof currentCtx.used === 'number') || liveMetrics?.context_size ? (
             <>
               <span className="text-gray-600">|</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="text-xs text-gray-500">Context</span>
-                <ContextIndicator ctx={currentCtx} />
-                {currentCtx.limit ? (
-                  <span className="text-[10px] text-gray-500">{currentCtx.used}/{currentCtx.limit}</span>
-                ) : (
-                  <span className="text-[10px] text-gray-500">{currentCtx.used}</span>
-                )}
-              </span>
+              <ContextDisplay currentCtx={currentCtx} liveMetrics={liveMetrics} />
             </>
           ) : null}
+          {(liveMetrics?.session_duration_ms || liveMetrics?.api_duration_ms) && (
+            <>
+              <span className="text-gray-600">|</span>
+              <span className="text-xs">
+                Session: {formatDuration(liveMetrics?.session_duration_ms)}
+                {liveMetrics?.api_duration_ms ? ` · API: ${formatDuration(liveMetrics.api_duration_ms)}` : ''}
+              </span>
+            </>
+          )}
         </span>
         <button type="button" className="text-blue-500 hover:underline" onClick={() => setShowLegend((s) => !s)}>
           {showLegend ? "Hide legend" : "Show legend"}
@@ -1374,37 +1431,6 @@ function stringifyJson(x: unknown): string {
   }
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) {
-    return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
-
-function getModelEmoji(model: string | undefined): string {
-  if (!model) return "";
-
-  // Opus models (most expensive/capable)
-  if (model.includes("opus")) return "💎";
-
-  // Sonnet models - omit
-  if (model.includes("sonnet")) return "";
-
-  // Haiku models (fast/cheap)
-  if (model.includes("haiku")) return "⚡";
-
-  // All other models
-  return "❓";
-}
-
-
 function SafePre({ children, className = "" }: { children: string; className?: string }) {
   return (
     <pre className={`text-xs sm:text-sm whitespace-pre-wrap break-words break-all max-w-full ${className}`}>
@@ -1428,6 +1454,94 @@ function ContextIndicator({ ctx }: { ctx?: { used?: number; limit?: number; pct?
         />
       </span>
       <span className="text-[10px] text-gray-400">{pct100}%</span>
+    </span>
+  );
+}
+
+function formatTokens(n: number, short?: boolean): string {
+  if (n >= 1000000) return `${Math.round(n / 1000000)}M`;
+  if (n >= 1000) return short ? `${Math.round(n / 1000)}` : `${Math.round(n / 1000)}K`;
+  return String(n);
+}
+
+function ContextDisplay({ currentCtx, liveMetrics, compact }: {
+  currentCtx?: { used?: number; limit?: number; pct?: number };
+  liveMetrics?: { context_remaining_pct?: number | null; context_size?: number | null } | null;
+  compact?: boolean;
+}) {
+  // Prefer liveMetrics for accurate context info
+  const remainingPct = liveMetrics?.context_remaining_pct;
+  const contextSize = liveMetrics?.context_size;
+  const usedPct = typeof remainingPct === 'number' ? 100 - remainingPct : null;
+
+  // Calculate used tokens from liveMetrics or fall back to currentCtx
+  let used: number | null = null;
+  let limit: number | null = null;
+
+  if (contextSize && typeof usedPct === 'number') {
+    limit = contextSize;
+    used = Math.round((usedPct / 100) * contextSize);
+  } else if (currentCtx?.used) {
+    used = currentCtx.used;
+    limit = currentCtx.limit ?? null;
+  }
+
+  // Determine percentage
+  const pct = usedPct ?? (currentCtx?.pct ? currentCtx.pct * 100 : null);
+
+  if (used === null && pct === null) return null;
+
+  // Color based on usage percentage
+  const color = pct !== null
+    ? pct > 80 ? "#ef4444" : pct > 50 ? "#f59e0b" : "#22c55e"
+    : "#6b7280";
+
+  const pctDisplay = pct !== null ? Math.round(pct) : null;
+
+  // Compact: single line for mobile
+  if (compact) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10px]"
+        title={used !== null && limit !== null ? `Context: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens` : 'Context usage'}
+      >
+        {pctDisplay !== null && (
+          <span className="relative inline-block h-1 w-8 rounded bg-gray-700 overflow-hidden align-middle">
+            <span
+              className="absolute left-0 top-0 h-1 rounded"
+              style={{ width: `${pctDisplay}%`, backgroundColor: color }}
+            />
+          </span>
+        )}
+        <span style={{ color }}>{pctDisplay !== null ? `${pctDisplay}%` : ''}</span>
+      </span>
+    );
+  }
+
+  // Desktop: two lines
+  return (
+    <span
+      className="inline-flex flex-col items-start text-xs leading-tight"
+      title={used !== null && limit !== null ? `Context: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens` : 'Context usage'}
+    >
+      <span className="inline-flex items-center gap-1">
+        {pctDisplay !== null && (
+          <span className="relative inline-block h-1.5 w-12 rounded bg-gray-700 overflow-hidden align-middle">
+            <span
+              className="absolute left-0 top-0 h-1.5 rounded transition-all"
+              style={{ width: `${pctDisplay}%`, backgroundColor: color }}
+            />
+          </span>
+        )}
+        <span style={{ color }}>
+          {pctDisplay !== null ? `${pctDisplay}%` : ''}
+        </span>
+      </span>
+      {used !== null && (
+        <span className="text-gray-500">
+          {formatTokens(used, true)}/{limit ? formatTokens(limit) : '?'}
+        </span>
+      )}
     </span>
   );
 }
@@ -1995,7 +2109,7 @@ function EntryCard({
 function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void }) {
   const fetcher = useFetcher<typeof action>();
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("sonnet");
+  const [model, setModel] = useState<ModelValue>(DEFAULT_MODEL);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isSubmitting = fetcher.state === "submitting";
@@ -2039,16 +2153,15 @@ function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void
             id="model-select"
             name="model"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => setModel(e.target.value as ModelValue)}
             disabled={isSubmitting}
             className="w-full p-2 rounded border border-gray-600 bg-gray-900 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <option value="sonnet">Sonnet 4.5 (default - daily use)</option>
-            <option value="opus">💎 Opus 4.1 (most powerful)</option>
-            <option value="haiku">⚡ Haiku (fastest)</option>
-            <option value="sonnet[1m]">Sonnet 4.5 [1M context]</option>
-            <option value="opusplan">Opus Plan Mode (hybrid)</option>
-            <option value="default">Default (auto-select)</option>
+            {MODEL_OPTIONS.map(({ value, label, emoji }) => (
+              <option key={value} value={value}>
+                {emoji && `${emoji} `}{label}
+              </option>
+            ))}
           </select>
         </div>
         <textarea
