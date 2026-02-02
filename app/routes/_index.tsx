@@ -2,6 +2,7 @@ import type { Route } from "./+types/_index";
 import { Form, Link, redirect, useLoaderData, useNavigation } from "react-router";
 import { useEffect, useState } from "react";
 import { formatUSD, costColorHex } from "~/utils/format";
+import { MODEL_OPTIONS, DEFAULT_MODEL, type ModelValue } from "~/utils/models";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -21,6 +22,7 @@ export async function action({ request }: Route.ActionArgs) {
     const formData = await request.formData();
     const projectEncoded = formData.get("project");
     const prompt = formData.get("prompt");
+    const model = formData.get("model");
 
     if (!projectEncoded || typeof projectEncoded !== "string") {
       return { success: false, error: "Project is required" };
@@ -89,7 +91,11 @@ export async function action({ request }: Route.ActionArgs) {
     console.log("[action] Working directory:", workingDirectory);
 
     const { startNewSession } = await import("~/claude-cli.server");
-    const result = await startNewSession(workingDirectory, initialPrompt);
+    const result = await startNewSession(
+      workingDirectory,
+      initialPrompt,
+      { model: typeof model === "string" ? model : undefined }
+    );
 
     if (result.success && result.sessionId) {
       console.log("[action] Session created successfully:", result.sessionId);
@@ -113,6 +119,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [newSessionProject, setNewSessionProject] = useState<string | null>(null);
   const [newSessionPrompt, setNewSessionPrompt] = useState("");
+  const [newSessionModel, setNewSessionModel] = useState<ModelValue>(DEFAULT_MODEL);
 
   const isCreatingSession = navigation.state === "submitting";
 
@@ -272,6 +279,26 @@ export default function Home() {
 
             <Form method="post" onSubmit={() => setNewSessionProject(null)}>
               <input type="hidden" name="project" value={newSessionProject} />
+
+              <div className="mb-4">
+                <label htmlFor="model-select" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Model
+                </label>
+                <select
+                  id="model-select"
+                  name="model"
+                  value={newSessionModel}
+                  onChange={(e) => setNewSessionModel(e.target.value as ModelValue)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {MODEL_OPTIONS.map(({ value, label, emoji }) => (
+                    <option key={value} value={value}>
+                      {emoji && `${emoji} `}{label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <textarea
                 name="prompt"
                 value={newSessionPrompt}
@@ -287,6 +314,7 @@ export default function Home() {
                   onClick={() => {
                     setNewSessionProject(null);
                     setNewSessionPrompt("");
+                    setNewSessionModel(DEFAULT_MODEL);
                   }}
                   className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                 >
