@@ -454,6 +454,20 @@ export function getLastSyncedAt(): string | null {
 }
 
 /**
+ * Get oldest session timestamp in DB (for sync optimization)
+ */
+export function getOldestSessionTimestamp(): string | null {
+  const db = getDb();
+  const result = db
+    .select({ timestamp: sessions.timestamp })
+    .from(sessions)
+    .orderBy(sessions.timestamp)
+    .limit(1)
+    .get();
+  return result?.timestamp ?? null;
+}
+
+/**
  * Set last sync timestamp
  */
 export function setLastSyncedAt(timestamp: string): void {

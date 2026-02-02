@@ -23,6 +23,7 @@ import {
   updateStoryStatusAndOrder,
   getNextOrder,
   setLastSyncedAt,
+  getOldestSessionTimestamp,
 } from "~/db/queries.server";
 
 const execAsync = promisify(exec);
@@ -229,10 +230,13 @@ export function saveKanbanSyncTime(): void {
 /**
  * Get all session IDs across all projects with git branch info
  * @param limit Max sessions to return (default 20, most recent first)
+ * @param sinceTimestamp Only include sessions newer than this timestamp (optimization)
  */
-async function getAllSessions(limit: number = 20): Promise<Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }>> {
+async function getAllSessions(limit: number = 20, sinceTimestamp?: string): Promise<Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }>> {
   const { projects } = await getProjects();
   const allSessions: Array<{ project: string; sessionId: string; timestamp: string; gitBranch: string | null }> = [];
+  const sinceTime = sinceTimestamp ? new Date(sinceTimestamp).getTime() : 0;
+  let skippedOld = 0;
 
   for (const proj of projects) {
     const projectDir = path.join(homedir(), ".claude", "projects", proj.name);
@@ -244,7 +248,12 @@ async function getAllSessions(limit: number = 20): Promise<Array<{ project: stri
         const filePath = path.join(projectDir, entry.name);
         try {
           const stats = await fs.stat(filePath);
-          // Get git branch from session preview
+          // Skip sessions older than cutoff (before expensive getSessionPreview)
+          if (sinceTime && stats.mtime.getTime() < sinceTime) {
+            skippedOld++;
+            continue;
+          }
+          // Get git branch from session preview (expensive - only for new sessions)
           const preview = await getSessionPreview(proj.name, sessionId);
           allSessions.push({
             project: proj.name,
@@ -261,6 +270,10 @@ async function getAllSessions(limit: number = 20): Promise<Array<{ project: stri
     }
   }
 
+  if (skippedOld > 0) {
+    console.log(`[kanban] Skipped ${skippedOld} old sessions (before ${sinceTimestamp})`);
+  }
+
   // Sort by timestamp descending (most recent first) and limit
   allSessions.sort((a, b) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -275,9 +288,11 @@ async function getAllSessions(limit: number = 20): Promise<Array<{ project: stri
  * Returns count of new stories and sessions added
  */
 export async function syncSessionsToStories(): Promise<{ newStories: number; newSessions: number }> {
-  const allSessions = await getAllSessions();
+  // Optimization: only look at sessions newer than oldest in DB
+  const oldestTimestamp = getOldestSessionTimestamp();
+  const allSessions = await getAllSessions(20, oldestTimestamp ?? undefined);
 
-  console.log(`[kanban] Found ${allSessions.length} sessions to process`);
+  console.log(`[kanban] Found ${allSessions.length} sessions to process (since ${oldestTimestamp ?? 'beginning'})`);
   if (allSessions.length > 0) {
     console.log(`[kanban] First session:`, allSessions[0]);
   }
