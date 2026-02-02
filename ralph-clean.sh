@@ -13,6 +13,10 @@ fi
 mkdir -p "$ARCHIVE_DIR"
 cp -r ralph/* "$ARCHIVE_DIR/"
 
+# Archive root-level ralph files
+[ -f "prompt.md" ] && cp prompt.md "$ARCHIVE_DIR/" && rm prompt.md
+[ -f "progress.txt" ] && cp progress.txt "$ARCHIVE_DIR/" && rm progress.txt
+
 # Mark phase beans as completed
 if command -v beans &> /dev/null; then
     echo "Completing phase beans..."
@@ -23,5 +27,8 @@ if command -v beans &> /dev/null; then
         done
 fi
 
+# Remove ralph directory
+rm -rf ralph/
+
 echo "Archived to: $ARCHIVE_DIR"
-echo "You can now delete ralph/ if desired"
+echo "ralph/, prompt.md, progress.txt cleaned up"
