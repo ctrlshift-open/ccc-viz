@@ -31,7 +31,7 @@ export function KanbanColumn({
 
   return (
     <div
-      className={`flex flex-col min-w-[300px] w-[300px] bg-gray-900 rounded-lg border ${
+      className={`flex flex-col min-w-[280px] w-[280px] sm:min-w-[300px] sm:w-[300px] bg-gray-900 rounded-lg border ${
         isDragOver ? "border-blue-500 bg-gray-800" : "border-gray-700"
       }`}
       onDragOver={(e) => {

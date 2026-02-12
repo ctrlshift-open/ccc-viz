@@ -109,7 +109,7 @@ export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRL
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex flex-wrap gap-4 mb-4 items-center">
+      <div className="flex flex-wrap gap-2 sm:gap-4 mb-4 items-center">
         {/* Sync button */}
         <button
           onClick={onSync}
@@ -141,7 +141,7 @@ export function KanbanBoard({ state, projects, onStoryMove, onTitleChange, onPRL
             placeholder="Search stories..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="w-full sm:w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
           />
           {searchQuery && (
             <button
