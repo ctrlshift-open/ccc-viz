@@ -17,16 +17,22 @@ type Dir = "asc" | "desc";
 
 function formatProjectTitle(projectPath: string): string {
   // Extract project name from path like '-Users-barendt-code-archeology'
-  // Replace 'code-' prefix with just the project name
   const segments = projectPath.split('-').filter(Boolean);
 
-  // Find 'code' segment and take everything after it
-  const codeIndex = segments.indexOf('code');
-  if (codeIndex >= 0 && codeIndex < segments.length - 1) {
-    return segments.slice(codeIndex + 1).join('-');
+  // Find last segment starting with 'code' (handles code, code2, etc.) and take everything after
+  let lastCodeIdx = -1;
+  for (let i = 0; i < segments.length; i++) {
+    if (/^code\d*$/.test(segments[i])) lastCodeIdx = i;
+  }
+  if (lastCodeIdx >= 0 && lastCodeIdx < segments.length - 1) {
+    return segments.slice(lastCodeIdx + 1).join('-');
   }
 
-  // Fallback: return the original path
+  // Fallback: strip Users-username prefix if present
+  if (segments[0] === 'Users' && segments.length > 2) {
+    return segments.slice(2).join('-');
+  }
+
   return projectPath;
 }
 
@@ -386,7 +392,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       // If ccusage import fails, continue without cost info
     }
 
-    // Detect new/modified .md files using git status
+    // Get ALL .md files in the project (tracked + untracked)
     let modifiedMdFiles: Array<{ filepath: string; status: string }> = [];
     let workingDirectory = "/";
     try {
@@ -404,56 +410,61 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       }
 
       if (workingDirectory !== "/") {
-        // Dynamically import execSync to avoid SSR issues
         const { execSync } = await import("node:child_process");
+        const { existsSync } = await import("node:fs");
+        const { join } = await import("node:path");
+
+        // Get all tracked .md files via git ls-files
+        const trackedFiles = execSync("git ls-files '*.md'", {
+          cwd: workingDirectory,
+          encoding: "utf-8"
+        }).split("\n").filter(f => f.trim());
+
+        // Get modified/new status from git status
         const gitStatus = execSync("git status --porcelain", {
           cwd: workingDirectory,
           encoding: "utf-8"
         });
-
-        modifiedMdFiles = gitStatus
-          .split("\n")
-          .filter(line => line.trim())
-          .map(line => {
-            const status = line.substring(0, 2).trim();
-            const filepath = line.substring(3).trim();
-            return { status, filepath };
-          })
-          .filter(({ status, filepath }) =>
-            (status === '??' || status === 'A' || status === 'M' || status.includes('M')) &&
-            (filepath.endsWith('.md') || filepath === 'progress.txt' || filepath.endsWith('/progress.txt'))
-          );
-
-        // Always include .beans.md and progress.txt files even without git changes
-        const { existsSync } = await import("node:fs");
-        const { join } = await import("node:path");
-        const { readdirSync } = await import("node:fs");
-
-        const alwaysShowFiles = ['progress.txt'];
-
-        // Check for .beans.md files in .beans directory
-        const beansDir = join(workingDirectory, '.beans');
-        if (existsSync(beansDir)) {
-          try {
-            const beansFiles = readdirSync(beansDir)
-              .filter(f => f.endsWith('.md'))
-              .map(f => `.beans/${f}`);
-            alwaysShowFiles.push(...beansFiles);
-          } catch {
-            // Ignore errors reading .beans directory
+        const statusMap = new Map<string, string>();
+        for (const line of gitStatus.split("\n").filter(l => l.trim())) {
+          const status = line.substring(0, 2).trim();
+          const filepath = line.substring(3).trim();
+          if (filepath.endsWith('.md')) {
+            statusMap.set(filepath, status);
           }
         }
 
-        // Add files that exist but aren't already in the list
-        for (const file of alwaysShowFiles) {
-          const fullPath = join(workingDirectory, file);
-          if (existsSync(fullPath) && !modifiedMdFiles.some(f => f.filepath === file)) {
-            modifiedMdFiles.push({ filepath: file, status: 'tracked' });
+        // Build file list: all tracked .md files with their status
+        const seen = new Set<string>();
+        for (const filepath of trackedFiles) {
+          seen.add(filepath);
+          const status = statusMap.get(filepath) || 'tracked';
+          modifiedMdFiles.push({ filepath, status });
+        }
+
+        // Add untracked .md files (status '??' or 'A')
+        for (const [filepath, status] of statusMap) {
+          if (!seen.has(filepath) && (status === '??' || status === 'A')) {
+            modifiedMdFiles.push({ filepath, status });
           }
         }
+
+        // Also include progress.txt if it exists
+        const progressPath = join(workingDirectory, 'progress.txt');
+        if (existsSync(progressPath) && !modifiedMdFiles.some(f => f.filepath === 'progress.txt')) {
+          modifiedMdFiles.push({ filepath: 'progress.txt', status: 'tracked' });
+        }
+
+        // Sort: modified/new first, then alphabetically
+        modifiedMdFiles.sort((a, b) => {
+          const aModified = a.status !== 'tracked' ? 0 : 1;
+          const bModified = b.status !== 'tracked' ? 0 : 1;
+          if (aModified !== bModified) return aModified - bModified;
+          return a.filepath.localeCompare(b.filepath);
+        });
       }
     } catch (error) {
-      console.error("[loader] Failed to get git status:", error);
+      console.error("[loader] Failed to get md files:", error);
       // Continue without file list - not critical
     }
 
@@ -968,15 +979,35 @@ export default function SessionDetails() {
   }, [totalsFetcher.state, totalsFetcher.data]);
 
   return (
-    <main className="p-4 pt-16 md:pt-14 max-w-screen-md mx-auto overflow-x-hidden">
-      <h1 className="text-xl font-semibold mb-2">
-        {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)} - Session Details
-      </h1>
-      <p className="text-sm text-gray-500 mb-4 break-all">
-        Project: <strong>{data.project}</strong> · Session: <strong>{data.sessionId}</strong>
-      </p>
-      {/* Mobile: compact single line */}
-      <div className="mb-3 text-[11px] text-gray-400 flex md:hidden items-center gap-1.5">
+    <>
+    {/* Mobile: sticky header */}
+    <div className="sticky top-0 z-[60] bg-gray-950 border-b border-gray-800 px-3 py-1.5 md:hidden">
+      {/* Row 1: hamburger + project name + session ID */}
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event("open-mobile-nav"))}
+          className="p-0.5 rounded text-gray-400 hover:text-gray-200 shrink-0"
+          aria-label="Open navigation menu"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+        <span className="text-sm font-semibold text-white truncate">
+          {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)}
+        </span>
+        <button
+          type="button"
+          className="ml-auto font-mono text-xs text-gray-400 hover:text-gray-200 cursor-pointer shrink-0"
+          title="Copy full session ID"
+          onClick={() => { navigator.clipboard.writeText(data.sessionId); }}
+        >
+          {data.sessionId.slice(0, 8)}
+        </button>
+      </div>
+      {/* Row 2: metrics */}
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-0.5">
         {liveMetrics?.model && (
           <>
             <span className="text-blue-400 font-medium">{liveMetrics.model.split(' ')[0]}</span>
@@ -995,12 +1026,73 @@ export default function SessionDetails() {
             <span className="text-gray-600">|</span>
             <span>
               s:{formatDuration(liveMetrics?.session_duration_ms)}
-              <span className="text-gray-600"> | </span>
-              {liveMetrics?.api_duration_ms ? <span className="text-cyan-500">a:{formatDuration(liveMetrics.api_duration_ms)}</span> : ''}
+              {liveMetrics?.api_duration_ms ? <><span className="text-gray-600">|</span><span className="text-cyan-500">a:{formatDuration(liveMetrics.api_duration_ms)}</span></> : ''}
             </span>
           </>
         )}
       </div>
+      {/* Row 3: nav + time ago + sort controls */}
+      <div className="flex items-center gap-2 text-[11px]">
+        <Link
+          to={`/${encodeURIComponent(data.project)}/sessions`}
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(`/${encodeURIComponent(data.project)}/sessions`);
+          }}
+          className="text-blue-600 hover:underline"
+        >
+          ← sessions
+        </Link>
+        <Link to="/" className="text-blue-600 hover:underline">
+          ← projects
+        </Link>
+        <span className="text-gray-500">{sinceLastMessageMs != null ? formatElapsed(sinceLastMessageMs) : "—"} ago</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Link
+            to={toggleUrl("desc")}
+            onClick={() => setPendingDir("desc")}
+            className={selectedDir === "desc" ? "font-semibold underline text-white" : "text-blue-600 hover:underline"}
+          >
+            Desc
+          </Link>
+          <span className="text-gray-600">|</span>
+          <Link
+            to={toggleUrl("asc")}
+            onClick={() => setPendingDir("asc")}
+            className={selectedDir === "asc" ? "font-semibold underline text-white" : "text-blue-600 hover:underline"}
+          >
+            Asc
+          </Link>
+          <span className="text-gray-600">|</span>
+          <Link
+            to={setViewUrl(condensed ? "detailed" : "condensed")}
+            className="text-blue-600 hover:underline"
+            aria-pressed={condensed}
+          >
+            {condensed ? "D" : "C"}
+          </Link>
+        </div>
+      </div>
+    </div>
+    <main className="p-4 pt-2 md:pt-14 max-w-screen-md mx-auto overflow-x-hidden">
+      {/* Desktop: title + session ID */}
+      <div className="hidden md:flex items-center gap-2 mb-1">
+        <h1 className="text-xl font-semibold">
+          {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)}
+        </h1>
+      </div>
+      <p className="text-xs text-gray-500 mb-2 hidden md:flex items-center gap-1">
+        <span className="break-all">{data.project}</span>
+        <span>·</span>
+        <button
+          type="button"
+          className="font-mono text-gray-400 hover:text-gray-200 cursor-pointer"
+          title="Copy full session ID"
+          onClick={() => { navigator.clipboard.writeText(data.sessionId); }}
+        >
+          {data.sessionId}
+        </button>
+      </p>
       {/* Desktop: full details */}
       <div className="mb-3 text-sm text-gray-400 hidden md:flex flex-wrap items-center gap-3">
         <span className="inline-flex items-center gap-2">
@@ -1063,7 +1155,7 @@ export default function SessionDetails() {
           ) : null}
         </span>
       </div>
-      <div className="mb-3 text-xs text-gray-400">
+      <div className="mb-2 text-xs text-gray-400 hidden md:block">
         <span className="inline-flex items-center gap-1">
           <span className="text-gray-500">Since last message:</span>
           <span>{sinceLastMessageMs != null ? formatElapsed(sinceLastMessageMs) : "—"}</span>
@@ -1086,7 +1178,7 @@ export default function SessionDetails() {
           )}
         </div>
       ) : null}
-      <div className="mb-4 flex flex-wrap gap-4 items-center">
+      <div className="mb-2 hidden md:flex flex-wrap gap-4 items-center text-sm">
         <Link
           to={`/${encodeURIComponent(data.project)}/sessions`}
           onClick={(e) => {
@@ -1095,14 +1187,13 @@ export default function SessionDetails() {
           }}
           className="text-blue-600 hover:underline"
         >
-          ← Back to sessions
+          ← sessions
         </Link>
         <Link to="/" className="text-blue-600 hover:underline">
-          ← Back to projects
+          ← projects
         </Link>
-        <span className="text-sm text-gray-600">Total lines: {metaTotal}</span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <span className="text-sm">Sort:</span>
+        <span className="text-gray-600">Lines: {metaTotal}</span>
+        <div className="ml-auto flex items-center gap-2">
           <Link
             to={toggleUrl("desc")}
             onClick={() => setPendingDir("desc")}
@@ -1121,10 +1212,10 @@ export default function SessionDetails() {
           <span className="text-gray-300">|</span>
           <Link
             to={setViewUrl(condensed ? "detailed" : "condensed")}
-            className="text-sm text-blue-600 hover:underline"
+            className="text-blue-600 hover:underline"
             aria-pressed={condensed}
           >
-            {condensed ? "Detailed view" : "Condensed view"}
+            {condensed ? "Detailed" : "Condensed"}
           </Link>
         </div>
       </div>
@@ -1161,9 +1252,8 @@ export default function SessionDetails() {
       </div>
 
       {condensed && viewMode === "messages" && catOptions.length > 0 ? (
-        <div className="mb-3 rounded border border-gray-600 bg-black p-2 overflow-x-hidden">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs sm:text-sm text-gray-400">Expand types:</span>
+        <div className="mb-3 rounded border border-gray-600 bg-black p-1.5 overflow-x-hidden">
+          <div className="flex flex-wrap items-center gap-1.5">
             {catOptions.map((c) => {
               const on = !!categoryExpanded[c.key];
               const cls = on
@@ -1174,22 +1264,22 @@ export default function SessionDetails() {
                 <Link
                   key={c.key}
                   to={toggleCategoryUrl(c.key)}
-                  className={`px-2 py-1 rounded border text-sm flex items-center gap-1 ${cls}`}
+                  className={`px-1.5 py-0.5 rounded border text-xs flex items-center ${cls}`}
                   aria-pressed={on}
                   title={c.key}
                 >
                   <Icon />
-                  <span className="text-xs">({c.count})</span>
                 </Link>
               );
             })}
+            <Link to={setAllCategoriesUrl(true)} className="text-xs text-blue-400 hover:underline">
+              Expand
+            </Link>
             <span className="text-gray-600">|</span>
-            <Link to={setAllCategoriesUrl(true)} className="text-xs sm:text-sm text-blue-400 hover:underline">
-              Expand all
+            <Link to={setAllCategoriesUrl(false)} className="text-xs text-blue-400 hover:underline">
+              Collapse
             </Link>
-            <Link to={setAllCategoriesUrl(false)} className="text-xs sm:text-sm text-blue-400 hover:underline">
-              Collapse all
-            </Link>
+            <span className="text-gray-600">|</span>
             <a
               href="#"
               onClick={(e) => {
@@ -1216,19 +1306,19 @@ export default function SessionDetails() {
                   }
                 }
               }}
-              className="text-xs sm:text-sm text-blue-400 hover:underline"
+              className="text-xs text-blue-400 hover:underline"
               title="Expand only the most recent non-tool message"
             >
-              Latest only
+              Latest
             </a>
             <span className="text-gray-600">|</span>
             <button
               type="button"
               onClick={clearManualOpens}
-              className="text-xs sm:text-sm text-blue-400 hover:underline"
+              className="text-xs text-blue-400 hover:underline"
               title="Clear manually opened entries"
             >
-              Clear manual opens{manualOpenUuids.size ? ` (${manualOpenUuids.size})` : ""}
+              Clear{manualOpenUuids.size ? ` (${manualOpenUuids.size})` : ""}
             </button>
           </div>
         </div>
@@ -1243,16 +1333,33 @@ export default function SessionDetails() {
         }}
       />
 
-      <PromptForm
-        onPromptSubmit={(text) => {
-          const pending = {
-            id: `pending-${Date.now()}`,
-            text,
-            timestamp: new Date().toISOString(),
-          };
-          setPendingPrompts((prev) => [...prev, pending]);
-        }}
-      />
+      {/* Mobile: collapsible prompt form */}
+      <details className="md:hidden mb-3">
+        <summary className="text-xs text-blue-400 cursor-pointer py-1">Send Prompt to Claude</summary>
+        <PromptForm
+          onPromptSubmit={(text) => {
+            const pending = {
+              id: `pending-${Date.now()}`,
+              text,
+              timestamp: new Date().toISOString(),
+            };
+            setPendingPrompts((prev) => [...prev, pending]);
+          }}
+        />
+      </details>
+      {/* Desktop: always visible prompt form */}
+      <div className="hidden md:block">
+        <PromptForm
+          onPromptSubmit={(text) => {
+            const pending = {
+              id: `pending-${Date.now()}`,
+              text,
+              timestamp: new Date().toISOString(),
+            };
+            setPendingPrompts((prev) => [...prev, pending]);
+          }}
+        />
+      </div>
 
       {/* File Grid View */}
       {viewMode === "files" && (
@@ -1327,9 +1434,9 @@ export default function SessionDetails() {
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                 />
               </svg>
-              <p className="text-sm">No tracked files in this session</p>
+              <p className="text-sm">No .md files found in this project</p>
               <p className="text-xs text-gray-600 mt-1">
-                Shows .beans/*.md, progress.txt, and modified .md files
+                Shows all markdown files in the project&apos;s git repo
               </p>
             </div>
           )}
@@ -1418,6 +1525,7 @@ export default function SessionDetails() {
         />
       )}
     </main>
+    </>
   );
 }
 
@@ -1433,7 +1541,7 @@ function stringifyJson(x: unknown): string {
 
 function SafePre({ children, className = "" }: { children: string; className?: string }) {
   return (
-    <pre className={`text-xs sm:text-sm whitespace-pre-wrap break-words break-all max-w-full ${className}`}>
+    <pre className={`text-sm sm:text-base whitespace-pre-wrap break-words break-all max-w-full ${className}`}>
       <code>{children}</code>
     </pre>
   );
@@ -1560,12 +1668,12 @@ function looksLikeMarkdown(text: string): boolean {
 function TextOrMarkdown({ text }: { text: string }) {
   if (looksLikeMarkdown(text)) {
     return (
-      <div className="text-xs text-gray-100  max-w-full overflow-x-hidden">
+      <div className="text-sm sm:text-base text-gray-100 max-w-full overflow-x-hidden">
         <ReactMarkdown
           components={{
-            h1: ({ children }) => <h1 className="text-lg sm:text-xl font-semibold mt-3 mb-1 break-words">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-base sm:text-lg font-semibold mt-3 mb-1 break-words">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1 break-words">{children}</h3>,
+            h1: ({ children }) => <h1 className="text-xl sm:text-2xl font-semibold mt-3 mb-1 break-words">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-lg sm:text-xl font-semibold mt-3 mb-1 break-words">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-base sm:text-lg font-semibold mt-2 mb-1 break-words">{children}</h3>,
             p: ({ children }) => (
               <p className="my-2 whitespace-pre-wrap break-words break-all">{children}</p>
             ),
@@ -1581,7 +1689,7 @@ function TextOrMarkdown({ text }: { text: string }) {
               const content = String(children ?? "");
               const isInline = !className?.includes('language-');
               if (isInline) {
-                return <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-100 text-sm break-words">{content}</code>;
+                return <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-100 text-base break-words">{content}</code>;
               }
               return <SafePre className="mt-2">{content}</SafePre>;
             },
@@ -1591,7 +1699,7 @@ function TextOrMarkdown({ text }: { text: string }) {
             ),
             table: ({ children }) => (
               <div className="overflow-x-auto max-w-full">
-                <table className="w-full text-left text-sm border-collapse">{children}</table>
+                <table className="w-full text-left text-base border-collapse">{children}</table>
               </div>
             ),
             th: ({ children }) => <th className="border-b border-gray-700 px-2 py-1 font-medium">{children}</th>,
@@ -1605,7 +1713,7 @@ function TextOrMarkdown({ text }: { text: string }) {
   }
 
   return (
-    <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+    <div className="text-base sm:text-lg text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
       {text}
     </div>
   );
