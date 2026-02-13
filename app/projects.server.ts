@@ -8,6 +8,19 @@ const execFile = promisify(_execFile);
 
 export type Project = { name: string; modified: string; modifiedTime: number };
 
+/** Fast: just directory names, no stat calls */
+export async function getProjectNames(): Promise<string[]> {
+  const dir = path.join(homedir(), ".claude", "projects");
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory() && e.name !== "." && e.name !== "..")
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
 export async function getProjects() {
   const dir = path.join(homedir(), ".claude", "projects");
   try {

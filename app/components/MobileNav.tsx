@@ -142,6 +142,32 @@ export function MobileNav() {
               </Link>
             </li>
 
+            <li>
+              <Link
+                to="/search"
+                className={`block px-3 py-2 rounded-lg transition-colors ${
+                  location.pathname === "/search"
+                    ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
+                    : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                  </svg>
+                  <span>Search</span>
+                </div>
+              </Link>
+            </li>
+
             {/* Current project section if we're in a project */}
             {location.pathname.includes("/sessions") && (
               <>

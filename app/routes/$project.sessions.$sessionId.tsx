@@ -8,6 +8,7 @@ import { FileViewer } from "~/welcome/FileViewer";
 import type { Route } from "./+types/$project.sessions.$sessionId";
 import { formatUSD, costColorHex, formatDuration } from "~/utils/format";
 import { MODEL_OPTIONS, DEFAULT_MODEL, getModelEmoji, type ModelValue } from "~/utils/models";
+import { classifyMessage, classifyLabel } from "~/utils/classify-message";
 
 type ParsedLine =
   | { ok: true; value: unknown; line: number }
@@ -243,41 +244,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       }
       catCount.set(key, (catCount.get(key) || 0) + 1);
     };
-    const classify = (v: any) => {
-      const top: string = (v?.type as string) || "unknown";
-      if (top === "summary" && !v?.message) {
-        addCat("summary", "summary");
-        return;
-      }
-      const c = v?.message?.content;
-      const segs: any[] = Array.isArray(c) ? c : c ? [c] : [];
-      {
-        const tu = segs.find((s) => s && s.type === "tool_use");
-        if (tu) {
-          const name = tu.name;
-          if (name === "TodoWrite") addCat(`${top}|tool_use|TodoWrite`, `TodoWrite`);
-          else addCat(`${top}|tool_use`, `tool use`);
-          return;
-        }
-      }
-      if (segs.find((s) => s && s.type === "tool_result")) {
-        addCat(`${top}|tool_result`, `tool result`);
-        return;
-      }
-      if (segs.find((s) => s && s.type === "thinking")) {
-        addCat(`${top}|thinking`, `thinking`);
-        return;
-      }
-      if (segs.find((s) => typeof s === "string" || (s && s.type === "text"))) {
-        addCat(`${top}|message`, `${top}`);
-        return;
-      }
-      addCat(`${top}|entry`, `${top}`);
-    };
     for (const line of allLines) {
       try {
         const v = JSON.parse(line);
-        classify(v);
+        const key = classifyMessage(v);
+        addCat(key, classifyLabel(key));
       } catch {
         addCat("invalid", "invalid");
       }
