@@ -733,7 +733,8 @@ export default function SessionDetails() {
 
         console.log("[SSE] Adding", newOnes.length, "items. Dir:", dir, "Current items:", items.length);
         setItems((prev) => {
-          const updated = dir === "desc" ? [...newOnes, ...prev] : [...prev, ...newOnes];
+          // SSE items arrive in ascending line order; reverse for desc so newest is first
+          const updated = dir === "desc" ? [...newOnes.slice().reverse(), ...prev] : [...prev, ...newOnes];
           console.log("[SSE] Items after update:", updated.length);
           return updated;
         });
