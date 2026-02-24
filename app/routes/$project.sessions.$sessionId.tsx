@@ -572,10 +572,15 @@ export default function SessionDetails() {
     const sp = new URLSearchParams(location.search);
     return sp.get("view") === "condensed";
   }, [location.search]);
-  // Category selection synced to URL (?cats=key1,key2)
+  // Category selection synced to URL (?cats=key1,key2) + persisted per project
+  const catsStorageKey = `ccviz:cats:${data.project}`;
   const catsParam = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     return sp.get("cats") || "";
+  }, [location.search]);
+  const hasCatsParam = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    return sp.has("cats");
   }, [location.search]);
   const selectedCats = useMemo(() => {
     const s = new Set<string>();
@@ -585,6 +590,46 @@ export default function SessionDetails() {
     }
     return s;
   }, [catsParam]);
+  // Restore persisted cats when entering a session without cats param
+  const lastSessionRef = useRef(data.sessionId);
+  useEffect(() => {
+    if (lastSessionRef.current !== data.sessionId) {
+      lastSessionRef.current = data.sessionId;
+      // New session navigation — restore if no cats param
+      if (!hasCatsParam) {
+        try {
+          const raw = localStorage.getItem(catsStorageKey);
+          if (raw != null) {
+            const params = new URLSearchParams(location.search);
+            params.set("cats", raw);
+            navigate(`?${params.toString()}`, { replace: true });
+          }
+        } catch {}
+      }
+    }
+  }, [data.sessionId, hasCatsParam, catsStorageKey, location.search, navigate]);
+  // Initial mount restore
+  const [catsRestored, setCatsRestored] = useState(false);
+  useEffect(() => {
+    if (catsRestored) return;
+    setCatsRestored(true);
+    if (hasCatsParam) return;
+    try {
+      const raw = localStorage.getItem(catsStorageKey);
+      if (raw != null) {
+        const params = new URLSearchParams(location.search);
+        params.set("cats", raw);
+        navigate(`?${params.toString()}`, { replace: true });
+      }
+    } catch {}
+  }, [catsRestored, hasCatsParam, catsStorageKey, location.search, navigate]);
+  // Persist cats to localStorage whenever they change via URL
+  useEffect(() => {
+    if (!hasCatsParam) return;
+    try {
+      localStorage.setItem(catsStorageKey, catsParam);
+    } catch {}
+  }, [hasCatsParam, catsParam, catsStorageKey]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Load persisted adaptive color preference per project
@@ -910,8 +955,8 @@ export default function SessionDetails() {
 
   const buildCatsUrl = (nextSet: Set<string>) => {
     const params = new URLSearchParams(location.search);
-    if (nextSet.size > 0) params.set("cats", Array.from(nextSet).join(","));
-    else params.delete("cats");
+    // Always set cats param (even empty) so it persists to localStorage
+    params.set("cats", Array.from(nextSet).join(","));
     params.delete("cursor");
     return `?${params.toString()}`;
   };
