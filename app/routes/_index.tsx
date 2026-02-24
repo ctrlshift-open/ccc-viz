@@ -99,7 +99,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (result.success && result.sessionId) {
       console.log("[action] Session created successfully:", result.sessionId);
-      return redirect(`/${encodeURIComponent(projectEncoded)}/sessions/${result.sessionId}`);
+      return redirect(`/${encodeURIComponent(projectEncoded)}/sessions/${result.sessionId}?view=condensed`);
     }
 
     console.error("[action] Failed to create session:", result.error);

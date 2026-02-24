@@ -193,64 +193,52 @@ export async function startNewSession(
   console.log("[startNewSession] Working directory:", workingDirectory);
   console.log("[startNewSession] Prompt:", prompt.slice(0, 100));
 
-  return new Promise((resolve) => {
-    const child = spawn(CLAUDE_PATH, args, {
-      cwd: workingDirectory,
-      env: { ...process.env, HOME: process.env.HOME },
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    // Register process in active registry
-    activeProcesses.set(sessionId, {
-      process: child,
-      startTime: Date.now(),
-      command: prompt.slice(0, 100)
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    child.on("error", (error) => {
-      console.error("[startNewSession] Process error:", error.message);
-      activeProcesses.delete(sessionId);
-      resolve({
-        success: false,
-        error: `Failed to execute CLI: ${error.message}`,
-        exitCode: 1,
-      });
-    });
-
-    child.on("close", (code) => {
-      const exitCode = code ?? 1;
-      const success = exitCode === 0;
-
-      console.log("[startNewSession] Process closed with code:", exitCode);
-      if (stderr) console.error("[startNewSession] stderr:", stderr);
-
-      activeProcesses.delete(sessionId);
-
-      if (success) {
-        resolve({
-          success: true,
-          sessionId,
-          exitCode: 0,
-        });
-      } else {
-        resolve({
-          success: false,
-          error: stderr || "Failed to create session",
-          exitCode,
-        });
-      }
-    });
+  const child = spawn(CLAUDE_PATH, args, {
+    cwd: workingDirectory,
+    env: { ...process.env, HOME: process.env.HOME },
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
   });
+
+  // Register process in active registry
+  activeProcesses.set(sessionId, {
+    process: child,
+    startTime: Date.now(),
+    command: prompt.slice(0, 100)
+  });
+
+  let spawnFailed = false;
+  child.on("error", (error) => {
+    console.error("[startNewSession] Process error:", error.message);
+    activeProcesses.delete(sessionId);
+    spawnFailed = true;
+  });
+
+  // Clean up registry when process exits (fire-and-forget)
+  child.on("close", (code) => {
+    console.log("[startNewSession] Process closed with code:", code);
+    activeProcesses.delete(sessionId);
+  });
+
+  // Wait for the .jsonl file to appear before redirecting.
+  // Claude CLI creates it shortly after spawn; poll up to 5s.
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { stat } = await import("node:fs/promises");
+  const projectDir = workingDirectory.replaceAll("/", "-");
+  const expectedFile = join(homedir(), ".claude", "projects", projectDir, `${sessionId}.jsonl`);
+  console.log("[startNewSession] Waiting for file:", expectedFile);
+
+  const start = Date.now();
+  while (Date.now() - start < 5000) {
+    if (spawnFailed) break;
+    try {
+      await stat(expectedFile);
+      console.log("[startNewSession] File appeared after", Date.now() - start, "ms");
+      break;
+    } catch {}
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  return { success: true, sessionId, exitCode: 0 };
 }
