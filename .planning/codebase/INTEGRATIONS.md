@@ -86,7 +86,7 @@
 ```bash
 VITE_DEV_HOST=0.0.0.0
 VITE_DEV_PORT=5174
-VITE_ALLOWED_HOSTS=localhost,100.96.167.84,bryans-macbook-pro-m4.tail67c0d1.ts.net,.tail67c0d1.ts.net,.ts.net
+VITE_ALLOWED_HOSTS=localhost,<your-tailscale-ip>,<your-hostname>.ts.net,.ts.net
 ```
 
 **Secrets location:**
