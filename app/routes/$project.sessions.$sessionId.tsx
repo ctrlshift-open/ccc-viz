@@ -10,6 +10,24 @@ import { formatUSD, costColorHex, formatDuration } from "~/utils/format";
 import { MODEL_OPTIONS, DEFAULT_MODEL, getModelEmoji, type ModelValue } from "~/utils/models";
 import { classifyMessage, classifyLabel } from "~/utils/classify-message";
 
+function copyToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text: string) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
+
 type ParsedLine =
   | { ok: true; value: unknown; line: number }
   | { ok: false; value: string; line: number };
@@ -1011,14 +1029,19 @@ export default function SessionDetails() {
             <path d="M4 6h16M4 12h16M4 18h16"></path>
           </svg>
         </button>
-        <span className="text-sm font-semibold text-white truncate">
+        <button
+          type="button"
+          className="text-sm font-semibold text-white truncate hover:text-gray-200 cursor-pointer"
+          title={`Copy path: ${data.file}`}
+          onClick={() => { copyToClipboard(data.file); }}
+        >
           {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)}
-        </span>
+        </button>
         <button
           type="button"
           className="ml-auto font-mono text-xs text-gray-400 hover:text-gray-200 cursor-pointer shrink-0"
           title="Copy full session ID"
-          onClick={() => { navigator.clipboard.writeText(data.sessionId); }}
+          onClick={() => { copyToClipboard(data.sessionId); }}
         >
           {data.sessionId.slice(0, 8)}
         </button>
@@ -1099,13 +1122,20 @@ export default function SessionDetails() {
         </h1>
       </div>
       <p className="text-xs text-gray-500 mb-2 hidden md:flex items-center gap-1">
-        <span className="break-all">{data.project}</span>
+        <button
+          type="button"
+          className="break-all hover:text-gray-200 cursor-pointer"
+          title={`Copy path: ${data.file}`}
+          onClick={() => { copyToClipboard(data.file); }}
+        >
+          {data.project}
+        </button>
         <span>·</span>
         <button
           type="button"
           className="font-mono text-gray-400 hover:text-gray-200 cursor-pointer"
           title="Copy full session ID"
-          onClick={() => { navigator.clipboard.writeText(data.sessionId); }}
+          onClick={() => { copyToClipboard(data.sessionId); }}
         >
           {data.sessionId}
         </button>
