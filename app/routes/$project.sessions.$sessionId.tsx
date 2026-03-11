@@ -3,8 +3,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useFetcher, useLoaderData, useLocation, useNavigate } from "react-router";
 import { MessageTypeIcon, getMessageTypeIcon } from "~/components/MessageTypeIcon";
+import { CancelButton } from "~/components/CancelButton";
+import { FileViewer } from "~/welcome/FileViewer";
 import type { Route } from "./+types/$project.sessions.$sessionId";
-import { formatUSD, costColorHex } from "~/utils/format";
+import { formatUSD, costColorHex, formatDuration } from "~/utils/format";
+import { MODEL_OPTIONS, DEFAULT_MODEL, getModelEmoji, type ModelValue } from "~/utils/models";
+import { classifyMessage, classifyLabel } from "~/utils/classify-message";
+
+function copyToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text: string) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
 
 type ParsedLine =
   | { ok: true; value: unknown; line: number }
@@ -14,16 +36,22 @@ type Dir = "asc" | "desc";
 
 function formatProjectTitle(projectPath: string): string {
   // Extract project name from path like '-Users-barendt-code-archeology'
-  // Replace 'code-' prefix with just the project name
   const segments = projectPath.split('-').filter(Boolean);
 
-  // Find 'code' segment and take everything after it
-  const codeIndex = segments.indexOf('code');
-  if (codeIndex >= 0 && codeIndex < segments.length - 1) {
-    return segments.slice(codeIndex + 1).join('-');
+  // Find last segment starting with 'code' (handles code, code2, etc.) and take everything after
+  let lastCodeIdx = -1;
+  for (let i = 0; i < segments.length; i++) {
+    if (/^code\d*$/.test(segments[i])) lastCodeIdx = i;
+  }
+  if (lastCodeIdx >= 0 && lastCodeIdx < segments.length - 1) {
+    return segments.slice(lastCodeIdx + 1).join('-');
   }
 
-  // Fallback: return the original path
+  // Fallback: strip Users-username prefix if present
+  if (segments[0] === 'Users' && segments.length > 2) {
+    return segments.slice(2).join('-');
+  }
+
   return projectPath;
 }
 
@@ -34,6 +62,148 @@ export function meta({ data }: Route.MetaArgs) {
 
   const projectTitle = formatProjectTitle(data.project);
   return [{ title: `${projectTitle}` }];
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+  const project = params.project!;
+  const sessionId = params.sessionId!;
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  // Handle file reading intent
+  if (intent === "readFile") {
+    const filepath = formData.get("filepath");
+
+    if (!filepath || typeof filepath !== "string") {
+      return { success: false, error: "File path is required" };
+    }
+
+    const { resolveSessionFile } = await import("~/utils/path-safety.server");
+    const { file } = resolveSessionFile(project, sessionId);
+    const { readFile } = await import("node:fs/promises");
+    const { join, resolve, relative } = await import("node:path");
+    const { stat } = await import("node:fs/promises");
+
+    try {
+      // Get working directory from session file
+      const content = await readFile(file, "utf8");
+      const lines = content.split("\n").filter(l => l.trim());
+      let workingDirectory = "/";
+
+      for (let i = 0; i < Math.min(20, lines.length); i++) {
+        try {
+          const parsed = JSON.parse(lines[i]);
+          if (parsed.cwd && typeof parsed.cwd === "string") {
+            workingDirectory = parsed.cwd;
+            break;
+          }
+        } catch {
+          // Skip invalid JSON lines
+        }
+      }
+
+      if (workingDirectory === "/") {
+        return { success: false, error: "Could not determine working directory" };
+      }
+
+      // Resolve and validate file path
+      const fullPath = resolve(workingDirectory, filepath);
+      const relativePath = relative(workingDirectory, fullPath);
+
+      // Security check: prevent directory traversal
+      if (relativePath.startsWith('..') || fullPath.indexOf(workingDirectory) !== 0) {
+        return { success: false, error: "Invalid file path - outside project directory" };
+      }
+
+      // Check file size (max 1MB)
+      const stats = await stat(fullPath);
+      if (stats.size > 1024 * 1024) {
+        return { success: false, error: "File too large (max 1MB)" };
+      }
+
+      // Read file contents
+      const fileContent = await readFile(fullPath, "utf8");
+
+      return {
+        success: true,
+        filepath,
+        content: fileContent,
+        size: stats.size,
+      };
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return { success: false, error: "File not found" };
+      } else if (error.code === 'EACCES') {
+        return { success: false, error: "Permission denied" };
+      }
+      return { success: false, error: `Failed to read file: ${error.message}` };
+    }
+  }
+
+  // Handle prompt submission intent (default)
+  const prompt = formData.get("prompt");
+  const model = formData.get("model");
+
+  if (!prompt || typeof prompt !== "string") {
+    return { success: false, error: "Prompt is required", output: "", exitCode: 1 };
+  }
+
+  const { resolveSessionFile } = await import("~/utils/path-safety.server");
+  const { file } = resolveSessionFile(project, sessionId);
+  const { readFile } = await import("node:fs/promises");
+
+  let workingDirectory = "/";
+  try {
+    console.log("[action] Reading session file:", file);
+    const content = await readFile(file, "utf8");
+    const lines = content.split("\n").filter(l => l.trim());
+    console.log("[action] File has", lines.length, "lines");
+
+    // Scan first 20 lines to find one with cwd
+    for (let i = 0; i < Math.min(20, lines.length); i++) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (parsed.cwd && typeof parsed.cwd === "string") {
+          workingDirectory = parsed.cwd;
+          console.log("[action] Found cwd in line", i + 1, ":", workingDirectory);
+          break;
+        }
+      } catch {
+        // Skip invalid JSON lines
+      }
+    }
+
+    if (workingDirectory === "/") {
+      console.log("[action] No cwd field found in first 20 lines");
+    }
+  } catch (error) {
+    console.error("[action] Failed to read cwd from session file:", error);
+  }
+
+  // Run CLI in background without awaiting
+  const { sendPromptToSession } = await import("~/claude-cli.server");
+  console.log("[action] Starting background CLI execution for session:", sessionId);
+  console.log("[action] Working directory:", workingDirectory);
+  console.log("[action] Prompt:", prompt.slice(0, 100));
+
+  sendPromptToSession(sessionId, prompt, {
+    model: model && typeof model === "string" ? model : undefined,
+    printMode: true,
+    workingDirectory,
+  }).then((result) => {
+    console.log("[action] CLI execution completed:", result.success ? "success" : "failed");
+    if (!result.success) {
+      console.error("[action] CLI execution failed:", result.error);
+      console.error("[action] CLI output:", result.output);
+    } else {
+      console.log("[action] CLI output length:", result.output.length);
+    }
+  }).catch((error) => {
+    console.error("[action] CLI execution threw error:", error);
+  });
+
+  // Return immediately
+  return { success: true, message: "Prompt sent to Claude CLI", output: "", exitCode: 0 };
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -92,41 +262,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       }
       catCount.set(key, (catCount.get(key) || 0) + 1);
     };
-    const classify = (v: any) => {
-      const top: string = (v?.type as string) || "unknown";
-      if (top === "summary" && !v?.message) {
-        addCat("summary", "summary");
-        return;
-      }
-      const c = v?.message?.content;
-      const segs: any[] = Array.isArray(c) ? c : c ? [c] : [];
-      {
-        const tu = segs.find((s) => s && s.type === "tool_use");
-        if (tu) {
-          const name = tu.name;
-          if (name === "TodoWrite") addCat(`${top}|tool_use|TodoWrite`, `TodoWrite`);
-          else addCat(`${top}|tool_use`, `tool use`);
-          return;
-        }
-      }
-      if (segs.find((s) => s && s.type === "tool_result")) {
-        addCat(`${top}|tool_result`, `tool result`);
-        return;
-      }
-      if (segs.find((s) => s && s.type === "thinking")) {
-        addCat(`${top}|thinking`, `thinking`);
-        return;
-      }
-      if (segs.find((s) => typeof s === "string" || (s && s.type === "text"))) {
-        addCat(`${top}|message`, `${top}`);
-        return;
-      }
-      addCat(`${top}|entry`, `${top}`);
-    };
     for (const line of allLines) {
       try {
         const v = JSON.parse(line);
-        classify(v);
+        const key = classifyMessage(v);
+        addCat(key, classifyLabel(key));
       } catch {
         addCat("invalid", "invalid");
       }
@@ -241,6 +381,100 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       // If ccusage import fails, continue without cost info
     }
 
+    // Get ALL .md files in the project (tracked + untracked)
+    let modifiedMdFiles: Array<{ filepath: string; status: string }> = [];
+    let workingDirectory = "/";
+    try {
+      // Read working directory from session file (same as action does)
+      for (let i = 0; i < Math.min(20, allLines.length); i++) {
+        try {
+          const parsed = JSON.parse(allLines[i]);
+          if (parsed.cwd && typeof parsed.cwd === "string") {
+            workingDirectory = parsed.cwd;
+            break;
+          }
+        } catch {
+          // Skip invalid JSON lines
+        }
+      }
+
+      if (workingDirectory !== "/") {
+        const { execSync } = await import("node:child_process");
+        const { existsSync } = await import("node:fs");
+        const { join } = await import("node:path");
+
+        // Get all tracked .md files via git ls-files
+        const trackedFiles = execSync("git ls-files '*.md'", {
+          cwd: workingDirectory,
+          encoding: "utf-8"
+        }).split("\n").filter(f => f.trim());
+
+        // Get modified/new status from git status
+        const gitStatus = execSync("git status --porcelain", {
+          cwd: workingDirectory,
+          encoding: "utf-8"
+        });
+        const statusMap = new Map<string, string>();
+        for (const line of gitStatus.split("\n").filter(l => l.trim())) {
+          const status = line.substring(0, 2).trim();
+          const filepath = line.substring(3).trim();
+          if (filepath.endsWith('.md')) {
+            statusMap.set(filepath, status);
+          }
+        }
+
+        // Build file list: all tracked .md files with their status
+        const seen = new Set<string>();
+        for (const filepath of trackedFiles) {
+          seen.add(filepath);
+          const status = statusMap.get(filepath) || 'tracked';
+          modifiedMdFiles.push({ filepath, status });
+        }
+
+        // Add untracked .md files (status '??' or 'A')
+        for (const [filepath, status] of statusMap) {
+          if (!seen.has(filepath) && (status === '??' || status === 'A')) {
+            modifiedMdFiles.push({ filepath, status });
+          }
+        }
+
+        // Also include progress.txt if it exists
+        const progressPath = join(workingDirectory, 'progress.txt');
+        if (existsSync(progressPath) && !modifiedMdFiles.some(f => f.filepath === 'progress.txt')) {
+          modifiedMdFiles.push({ filepath: 'progress.txt', status: 'tracked' });
+        }
+
+        // Sort: modified/new first, then alphabetically
+        modifiedMdFiles.sort((a, b) => {
+          const aModified = a.status !== 'tracked' ? 0 : 1;
+          const bModified = b.status !== 'tracked' ? 0 : 1;
+          if (aModified !== bModified) return aModified - bModified;
+          return a.filepath.localeCompare(b.filepath);
+        });
+      }
+    } catch (error) {
+      console.error("[loader] Failed to get md files:", error);
+      // Continue without file list - not critical
+    }
+
+    // Read live metrics from sidecar file (written by statusline hook)
+    let liveMetrics: {
+      model?: string | null;
+      cost_usd?: number;
+      session_duration_ms?: number;
+      api_duration_ms?: number;
+      context_remaining_pct?: number | null;
+      context_size?: number | null;
+      tokens?: { input?: number; output?: number; cache_creation?: number; cache_read?: number };
+    } | null = null;
+    try {
+      const metricsPath = file.replace('.jsonl', '.metrics.json');
+      const metricsContent = await readFile(metricsPath, 'utf-8');
+      liveMetrics = JSON.parse(metricsContent);
+    } catch {
+      // No metrics file or invalid JSON - that's OK
+    }
+
     return {
       baseDir,
       project,
@@ -252,6 +486,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       totals,
       messageCostScale,
       currentCtx: (globalThis as any)._ccvizCurrentCtx,
+      modifiedMdFiles,
+      workingDirectory,
+      liveMetrics,
     };
   } catch (error) {
     return {
@@ -263,6 +500,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       categories: [],
       meta: { total: 0, limit, cursor, nextCursor: null, dir },
       error: `Failed to read session: ${(error as Error).message}`,
+      modifiedMdFiles: [],
+      workingDirectory: "/",
+      liveMetrics: null,
     };
   }
 }
@@ -274,6 +514,7 @@ export default function SessionDetails() {
   const navigate = useNavigate();
 
   const [items, setItems] = useState(data.parsed);
+  const [pendingPrompts, setPendingPrompts] = useState<Array<{ id: string; text: string; timestamp: string }>>([]);
   const [seenLines, setSeenLines] = useState<Set<number>>(() => new Set((data.parsed || []).map((p: any) => p.line as number)));
   const seenLinesRef = useRef<Set<number>>(seenLines);
   const [nextCursor, setNextCursor] = useState<string | null>(data.meta.nextCursor);
@@ -283,6 +524,7 @@ export default function SessionDetails() {
   const [totals, setTotals] = useState(data.totals);
   const [messageCostScale, setMessageCostScale] = useState(data.messageCostScale);
   const [currentCtx, setCurrentCtx] = useState<{ used: number; limit?: number; pct?: number } | undefined>((data as any).currentCtx);
+  const [liveMetrics, setLiveMetrics] = useState<typeof data.liveMetrics>(data.liveMetrics);
   type Cat = { key: string; label: string; count: number };
   const [catOptions, setCatOptions] = useState<Cat[]>(data.categories || []);
   const [metaTotal, setMetaTotal] = useState<number>(data.meta.total);
@@ -293,6 +535,40 @@ export default function SessionDetails() {
   const [lastEventTimestamp, setLastEventTimestamp] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const [pendingDir, setPendingDir] = useState<Dir | null>(null);
+
+  // Files tab state
+  const [viewMode, setViewMode] = useState<"messages" | "files">("messages");
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const fileFetcher = useFetcher<any>();
+
+  // Handle file click
+  const handleFileClick = (filepath: string) => {
+    setSelectedFile(filepath);
+    const formData = new FormData();
+    formData.append("intent", "readFile");
+    formData.append("filepath", filepath);
+    fileFetcher.submit(formData, { method: "post" });
+  };
+
+  // Update file content when fetcher completes
+  useEffect(() => {
+    if (fileFetcher.state === "idle" && fileFetcher.data) {
+      const data = fileFetcher.data as any;
+      if (data.success && data.content) {
+        setFileContent(data.content);
+      } else if (!data.success && data.error) {
+        alert(`Error loading file: ${data.error}`);
+        setSelectedFile(null);
+      }
+    }
+  }, [fileFetcher.state, fileFetcher.data]);
+
+  // Close file viewer
+  const handleCloseFile = () => {
+    setSelectedFile(null);
+    setFileContent(null);
+  };
 
   // Update document title when status changes
   useEffect(() => {
@@ -314,10 +590,15 @@ export default function SessionDetails() {
     const sp = new URLSearchParams(location.search);
     return sp.get("view") === "condensed";
   }, [location.search]);
-  // Category selection synced to URL (?cats=key1,key2)
+  // Category selection synced to URL (?cats=key1,key2) + persisted per project
+  const catsStorageKey = `ccviz:cats:${data.project}`;
   const catsParam = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     return sp.get("cats") || "";
+  }, [location.search]);
+  const hasCatsParam = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    return sp.has("cats");
   }, [location.search]);
   const selectedCats = useMemo(() => {
     const s = new Set<string>();
@@ -327,6 +608,46 @@ export default function SessionDetails() {
     }
     return s;
   }, [catsParam]);
+  // Restore persisted cats when entering a session without cats param
+  const lastSessionRef = useRef(data.sessionId);
+  useEffect(() => {
+    if (lastSessionRef.current !== data.sessionId) {
+      lastSessionRef.current = data.sessionId;
+      // New session navigation — restore if no cats param
+      if (!hasCatsParam) {
+        try {
+          const raw = localStorage.getItem(catsStorageKey);
+          if (raw != null) {
+            const params = new URLSearchParams(location.search);
+            params.set("cats", raw);
+            navigate(`?${params.toString()}`, { replace: true });
+          }
+        } catch {}
+      }
+    }
+  }, [data.sessionId, hasCatsParam, catsStorageKey, location.search, navigate]);
+  // Initial mount restore
+  const [catsRestored, setCatsRestored] = useState(false);
+  useEffect(() => {
+    if (catsRestored) return;
+    setCatsRestored(true);
+    if (hasCatsParam) return;
+    try {
+      const raw = localStorage.getItem(catsStorageKey);
+      if (raw != null) {
+        const params = new URLSearchParams(location.search);
+        params.set("cats", raw);
+        navigate(`?${params.toString()}`, { replace: true });
+      }
+    } catch {}
+  }, [catsRestored, hasCatsParam, catsStorageKey, location.search, navigate]);
+  // Persist cats to localStorage whenever they change via URL
+  useEffect(() => {
+    if (!hasCatsParam) return;
+    try {
+      localStorage.setItem(catsStorageKey, catsParam);
+    } catch {}
+  }, [hasCatsParam, catsParam, catsStorageKey]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Load persisted adaptive color preference per project
@@ -460,10 +781,26 @@ export default function SessionDetails() {
       try {
         const payload = JSON.parse(ev.data) as { items?: any[] };
         if (!payload?.items || !Array.isArray(payload.items) || payload.items.length === 0) return;
+        console.log("[SSE] Received", payload.items.length, "items");
         // Deduplicate by line number
         const newOnes = (payload.items as any[]).filter((it) => typeof it?.line === "number" && !seenLinesRef.current.has(it.line));
+        console.log("[SSE] After dedup:", newOnes.length, "new items");
         if (newOnes.length === 0) return;
-        setItems((prev) => (dir === "desc" ? [...newOnes, ...prev] : [...prev, ...newOnes]));
+
+        // Check if any new messages are user messages - if so, clear pending prompts FIRST
+        const hasUserMessage = newOnes.some((it) => it.ok && (it.value as any)?.type === "user");
+        if (hasUserMessage) {
+          console.log("[SSE] User message received, clearing pending prompts");
+          setPendingPrompts([]);
+        }
+
+        console.log("[SSE] Adding", newOnes.length, "items. Dir:", dir, "Current items:", items.length);
+        setItems((prev) => {
+          // SSE items arrive in ascending line order; reverse for desc so newest is first
+          const updated = dir === "desc" ? [...newOnes.slice().reverse(), ...prev] : [...prev, ...newOnes];
+          console.log("[SSE] Items after update:", updated.length);
+          return updated;
+        });
         setSeenLines((prev) => {
           const s = new Set(prev);
           for (const it of newOnes) s.add(it.line);
@@ -493,14 +830,23 @@ export default function SessionDetails() {
     const connect = () => {
       if (closed) return;
       try { if (es) { es.close(); es = null; } } catch { }
+      console.log("[SSE] Connecting to:", streamUrl);
       const next = new EventSource(streamUrl);
       es = next;
       next.onopen = () => {
+        console.log("[SSE] Connected");
         setLiveConnected(true);
         retry = 0;
       };
       next.addEventListener("append", onAppend);
-      next.onerror = () => {
+      next.addEventListener("ready", (e) => {
+        console.log("[SSE] Stream ready");
+      });
+      next.addEventListener("ping", () => {
+        console.log("[SSE] Ping received");
+      });
+      next.onerror = (err) => {
+        console.error("[SSE] Error:", err);
         setLiveConnected(false);
         try { next.removeEventListener("append", onAppend); } catch { }
         try { next.close(); } catch { }
@@ -508,6 +854,7 @@ export default function SessionDetails() {
         const base = 1000;
         const max = 20000;
         const delay = Math.min(max, base * Math.pow(2, retry++)) + Math.floor(Math.random() * 300);
+        console.log("[SSE] Reconnecting in", delay, "ms");
         if (!closed) {
           timer = setTimeout(connect, delay);
         }
@@ -626,8 +973,8 @@ export default function SessionDetails() {
 
   const buildCatsUrl = (nextSet: Set<string>) => {
     const params = new URLSearchParams(location.search);
-    if (nextSet.size > 0) params.set("cats", Array.from(nextSet).join(","));
-    else params.delete("cats");
+    // Always set cats param (even empty) so it persists to localStorage
+    params.set("cats", Array.from(nextSet).join(","));
     params.delete("cursor");
     return `?${params.toString()}`;
   };
@@ -661,42 +1008,170 @@ export default function SessionDetails() {
         if (d.messageCostScale) setMessageCostScale(d.messageCostScale);
         if (Array.isArray(d.categories)) setCatOptions(d.categories);
         if (d.currentCtx) setCurrentCtx(d.currentCtx);
+        if (d.liveMetrics) setLiveMetrics(d.liveMetrics);
       }
     }
   }, [totalsFetcher.state, totalsFetcher.data]);
 
   return (
-    <main className="p-4 max-w-screen-md mx-auto overflow-x-hidden">
-      <h1 className="text-xl font-semibold mb-2">
-        {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)} - Session Details
-      </h1>
-      <p className="text-sm text-gray-500 mb-4 break-all">
-        Project: <strong>{data.project}</strong> · Session: <strong>{data.sessionId}</strong>
+    <>
+    {/* Mobile: sticky header */}
+    <div className="sticky top-0 z-[60] bg-gray-950 border-b border-gray-800 px-3 py-1.5 md:hidden">
+      {/* Row 1: hamburger + project name + session ID */}
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event("open-mobile-nav"))}
+          className="p-0.5 rounded text-gray-400 hover:text-gray-200 shrink-0"
+          aria-label="Open navigation menu"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="text-sm font-semibold text-white truncate hover:text-gray-200 cursor-pointer"
+          title={`Copy path: ${data.file}`}
+          onClick={() => { copyToClipboard(data.file); }}
+        >
+          {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)}
+        </button>
+        <button
+          type="button"
+          className="ml-auto font-mono text-xs text-gray-400 hover:text-gray-200 cursor-pointer shrink-0"
+          title="Copy full session ID"
+          onClick={() => { copyToClipboard(data.sessionId); }}
+        >
+          {data.sessionId.slice(0, 8)}
+        </button>
+      </div>
+      {/* Row 2: metrics */}
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-0.5">
+        {liveMetrics?.model && (
+          <>
+            <span className="text-blue-400 font-medium">{liveMetrics.model.split(' ')[0]}</span>
+            <span className="text-gray-600">|</span>
+          </>
+        )}
+        <strong style={{ color: costColorHex(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined)}</strong>
+        {((currentCtx && typeof currentCtx.used === 'number') || liveMetrics?.context_size) && (
+          <>
+            <span className="text-gray-600">|</span>
+            <ContextDisplay currentCtx={currentCtx} liveMetrics={liveMetrics} compact />
+          </>
+        )}
+        {(liveMetrics?.session_duration_ms || liveMetrics?.api_duration_ms) && (
+          <>
+            <span className="text-gray-600">|</span>
+            <span>
+              s:{formatDuration(liveMetrics?.session_duration_ms)}
+              {liveMetrics?.api_duration_ms ? <><span className="text-gray-600">|</span><span className="text-cyan-500">a:{formatDuration(liveMetrics.api_duration_ms)}</span></> : ''}
+            </span>
+          </>
+        )}
+      </div>
+      {/* Row 3: nav + time ago + sort controls */}
+      <div className="flex items-center gap-2 text-[11px]">
+        <Link
+          to={`/${encodeURIComponent(data.project)}/sessions`}
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(`/${encodeURIComponent(data.project)}/sessions`);
+          }}
+          className="text-blue-600 hover:underline"
+        >
+          ← sessions
+        </Link>
+        <Link to="/" className="text-blue-600 hover:underline">
+          ← projects
+        </Link>
+        <span className="text-gray-500">{sinceLastMessageMs != null ? formatElapsed(sinceLastMessageMs) : "—"} ago</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Link
+            to={toggleUrl("desc")}
+            onClick={() => setPendingDir("desc")}
+            className={selectedDir === "desc" ? "font-semibold underline text-white" : "text-blue-600 hover:underline"}
+          >
+            Desc
+          </Link>
+          <span className="text-gray-600">|</span>
+          <Link
+            to={toggleUrl("asc")}
+            onClick={() => setPendingDir("asc")}
+            className={selectedDir === "asc" ? "font-semibold underline text-white" : "text-blue-600 hover:underline"}
+          >
+            Asc
+          </Link>
+          <span className="text-gray-600">|</span>
+          <Link
+            to={setViewUrl(condensed ? "detailed" : "condensed")}
+            className="text-blue-600 hover:underline"
+            aria-pressed={condensed}
+          >
+            {condensed ? "D" : "C"}
+          </Link>
+        </div>
+      </div>
+    </div>
+    <main className="p-4 pt-2 md:pt-14 max-w-screen-md mx-auto overflow-x-hidden">
+      {/* Desktop: title + session ID */}
+      <div className="hidden md:flex items-center gap-2 mb-1">
+        <h1 className="text-xl font-semibold">
+          {isStopped ? '🔴' : '🟢'} {formatProjectTitle(data.project)}
+        </h1>
+      </div>
+      <p className="text-xs text-gray-500 mb-2 hidden md:flex items-center gap-1">
+        <button
+          type="button"
+          className="break-all hover:text-gray-200 cursor-pointer"
+          title={`Copy path: ${data.file}`}
+          onClick={() => { copyToClipboard(data.file); }}
+        >
+          {data.project}
+        </button>
+        <span>·</span>
+        <button
+          type="button"
+          className="font-mono text-gray-400 hover:text-gray-200 cursor-pointer"
+          title="Copy full session ID"
+          onClick={() => { copyToClipboard(data.sessionId); }}
+        >
+          {data.sessionId}
+        </button>
       </p>
-      <div className="mb-3 text-sm text-gray-400 flex flex-wrap items-center gap-3">
+      {/* Desktop: full details */}
+      <div className="mb-3 text-sm text-gray-400 hidden md:flex flex-wrap items-center gap-3">
         <span className="inline-flex items-center gap-2">
+          {liveMetrics?.model && (
+            <>
+              <span className="text-blue-400 font-medium">{liveMetrics.model}</span>
+              <span className="text-gray-600">|</span>
+            </>
+          )}
           <span>
-            Total cost: <strong style={{ color: costColorHex(totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(totals?.totalUSD as number | undefined)}</strong>
+            Total cost: <strong style={{ color: costColorHex(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined, messageScaleUsed) }}>{formatUSD(liveMetrics?.cost_usd ?? totals?.totalUSD as number | undefined)}</strong>
           </span>
           <span className="text-gray-600">|</span>
           <span>
             tokens in {typeof totals?.inputTokens === "number" ? totals!.inputTokens : "—"}
             {" "}· out {typeof totals?.outputTokens === "number" ? totals!.outputTokens : "—"}
           </span>
-          {currentCtx && typeof currentCtx.used === 'number' ? (
+          {(currentCtx && typeof currentCtx.used === 'number') || liveMetrics?.context_size ? (
             <>
               <span className="text-gray-600">|</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="text-xs text-gray-500">Context</span>
-                <ContextIndicator ctx={currentCtx} />
-                {currentCtx.limit ? (
-                  <span className="text-[10px] text-gray-500">{currentCtx.used}/{currentCtx.limit}</span>
-                ) : (
-                  <span className="text-[10px] text-gray-500">{currentCtx.used}</span>
-                )}
-              </span>
+              <ContextDisplay currentCtx={currentCtx} liveMetrics={liveMetrics} />
             </>
           ) : null}
+          {(liveMetrics?.session_duration_ms || liveMetrics?.api_duration_ms) && (
+            <>
+              <span className="text-gray-600">|</span>
+              <span className="text-xs">
+                Session: {formatDuration(liveMetrics?.session_duration_ms)}
+                {liveMetrics?.api_duration_ms ? ` · API: ${formatDuration(liveMetrics.api_duration_ms)}` : ''}
+              </span>
+            </>
+          )}
         </span>
         <button type="button" className="text-blue-500 hover:underline" onClick={() => setShowLegend((s) => !s)}>
           {showLegend ? "Hide legend" : "Show legend"}
@@ -727,7 +1202,7 @@ export default function SessionDetails() {
           ) : null}
         </span>
       </div>
-      <div className="mb-3 text-xs text-gray-400">
+      <div className="mb-2 text-xs text-gray-400 hidden md:block">
         <span className="inline-flex items-center gap-1">
           <span className="text-gray-500">Since last message:</span>
           <span>{sinceLastMessageMs != null ? formatElapsed(sinceLastMessageMs) : "—"}</span>
@@ -750,7 +1225,7 @@ export default function SessionDetails() {
           )}
         </div>
       ) : null}
-      <div className="mb-4 flex flex-wrap gap-4 items-center">
+      <div className="mb-2 hidden md:flex flex-wrap gap-4 items-center text-sm">
         <Link
           to={`/${encodeURIComponent(data.project)}/sessions`}
           onClick={(e) => {
@@ -759,21 +1234,13 @@ export default function SessionDetails() {
           }}
           className="text-blue-600 hover:underline"
         >
-          ← Back to sessions
+          ← sessions
         </Link>
-        <Link
-          to="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/`);
-          }}
-          className="text-blue-600 hover:underline"
-        >
-          Back to projects
+        <Link to="/" className="text-blue-600 hover:underline">
+          ← projects
         </Link>
-        <span className="text-sm text-gray-600">Total lines: {metaTotal}</span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <span className="text-sm">Sort:</span>
+        <span className="text-gray-600">Lines: {metaTotal}</span>
+        <div className="ml-auto flex items-center gap-2">
           <Link
             to={toggleUrl("desc")}
             onClick={() => setPendingDir("desc")}
@@ -792,18 +1259,48 @@ export default function SessionDetails() {
           <span className="text-gray-300">|</span>
           <Link
             to={setViewUrl(condensed ? "detailed" : "condensed")}
-            className="text-sm text-blue-600 hover:underline"
+            className="text-blue-600 hover:underline"
             aria-pressed={condensed}
           >
-            {condensed ? "Detailed view" : "Condensed view"}
+            {condensed ? "Detailed" : "Condensed"}
           </Link>
         </div>
       </div>
 
-      {condensed && catOptions.length > 0 ? (
-        <div className="mb-3 rounded border border-gray-600 bg-black p-2 overflow-x-hidden">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs sm:text-sm text-gray-400">Expand types:</span>
+      {/* View mode toggle: Messages vs Files */}
+      <div className="mb-3 flex flex-wrap gap-2 items-center">
+        <button
+          type="button"
+          onClick={() => setViewMode("messages")}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            viewMode === "messages"
+              ? "bg-blue-900 text-blue-200 border-blue-600"
+              : "bg-gray-900 text-gray-300 border-gray-600 hover:bg-gray-800"
+          }`}
+        >
+          Messages
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("files")}
+          className={`px-3 py-1.5 rounded border text-sm inline-flex items-center gap-1 ${
+            viewMode === "files"
+              ? "bg-blue-900 text-blue-200 border-blue-600"
+              : "bg-gray-900 text-gray-300 border-gray-600 hover:bg-gray-800"
+          }`}
+        >
+          Files
+          {data.modifiedMdFiles && data.modifiedMdFiles.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-xs font-medium">
+              {data.modifiedMdFiles.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {condensed && viewMode === "messages" && catOptions.length > 0 ? (
+        <div className="mb-3 rounded border border-gray-600 bg-black p-1.5 overflow-x-hidden">
+          <div className="flex flex-wrap items-center gap-1.5">
             {catOptions.map((c) => {
               const on = !!categoryExpanded[c.key];
               const cls = on
@@ -814,41 +1311,209 @@ export default function SessionDetails() {
                 <Link
                   key={c.key}
                   to={toggleCategoryUrl(c.key)}
-                  className={`px-2 py-1 rounded border text-sm flex items-center gap-1 ${cls}`}
+                  className={`px-1.5 py-0.5 rounded border text-xs flex items-center ${cls}`}
                   aria-pressed={on}
                   title={c.key}
                 >
                   <Icon />
-                  <span className="text-xs">({c.count})</span>
                 </Link>
               );
             })}
+            <Link to={setAllCategoriesUrl(true)} className="text-xs text-blue-400 hover:underline">
+              Expand
+            </Link>
             <span className="text-gray-600">|</span>
-            <Link to={setAllCategoriesUrl(true)} className="text-xs sm:text-sm text-blue-400 hover:underline">
-              Expand all
+            <Link to={setAllCategoriesUrl(false)} className="text-xs text-blue-400 hover:underline">
+              Collapse
             </Link>
-            <Link to={setAllCategoriesUrl(false)} className="text-xs sm:text-sm text-blue-400 hover:underline">
-              Collapse all
-            </Link>
+            <span className="text-gray-600">|</span>
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                // Find the most recent non-tool message
+                const nonToolItems = items.filter((it) => {
+                  if (!it.ok) return false;
+                  const v = it.value as any;
+                  const content = v?.message?.content;
+                  const segs: any[] = Array.isArray(content) ? content : content ? [content] : [];
+                  // Exclude tool_use and tool_result
+                  const hasToolUse = segs.find((s) => s && s.type === "tool_use");
+                  const hasToolResult = segs.find((s) => s && s.type === "tool_result");
+                  return !hasToolUse && !hasToolResult;
+                });
+
+                if (nonToolItems.length > 0) {
+                  const mostRecent = nonToolItems[0]; // First item in desc order
+                  const uuid = (mostRecent.value as any)?.uuid || (mostRecent.value as any)?.message?.id || (mostRecent.value as any)?.leafUuid;
+                  if (uuid) {
+                    const next = new Set([uuid]);
+                    setManualOpenUuids(next);
+                    persistManualOpen(next);
+                  }
+                }
+              }}
+              className="text-xs text-blue-400 hover:underline"
+              title="Expand only the most recent non-tool message"
+            >
+              Latest
+            </a>
             <span className="text-gray-600">|</span>
             <button
               type="button"
               onClick={clearManualOpens}
-              className="text-xs sm:text-sm text-blue-400 hover:underline"
+              className="text-xs text-blue-400 hover:underline"
               title="Clear manually opened entries"
             >
-              Clear manual opens{manualOpenUuids.size ? ` (${manualOpenUuids.size})` : ""}
+              Clear{manualOpenUuids.size ? ` (${manualOpenUuids.size})` : ""}
             </button>
           </div>
         </div>
       ) : null}
 
-      {data.error ? (
-        <div className="text-red-600">{data.error}</div>
-      ) : items.length === 0 ? (
-        <div className="text-gray-600">No JSON lines found.</div>
-      ) : (
-        <div className={condensed ? "flex flex-wrap gap-2" : "grid gap-3"}>
+      <CancelButton
+        project={data.project}
+        sessionId={data.sessionId}
+        onCancelled={() => {
+          // Optionally refresh data or clear pending prompts when cancelled
+          console.log("[CancelButton] Process cancelled");
+        }}
+      />
+
+      {/* Mobile: collapsible prompt form */}
+      <details className="md:hidden mb-3">
+        <summary className="text-xs text-blue-400 cursor-pointer py-1">Send Prompt to Claude</summary>
+        <PromptForm
+          onPromptSubmit={(text) => {
+            const pending = {
+              id: `pending-${Date.now()}`,
+              text,
+              timestamp: new Date().toISOString(),
+            };
+            setPendingPrompts((prev) => [...prev, pending]);
+          }}
+        />
+      </details>
+      {/* Desktop: always visible prompt form */}
+      <div className="hidden md:block">
+        <PromptForm
+          onPromptSubmit={(text) => {
+            const pending = {
+              id: `pending-${Date.now()}`,
+              text,
+              timestamp: new Date().toISOString(),
+            };
+            setPendingPrompts((prev) => [...prev, pending]);
+          }}
+        />
+      </div>
+
+      {/* File Grid View */}
+      {viewMode === "files" && (
+        <div className="space-y-3">
+          {data.modifiedMdFiles && data.modifiedMdFiles.length > 0 ? (
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+              {data.modifiedMdFiles.map((file) => {
+                const statusColor =
+                  file.status === "??" || file.status === "A"
+                    ? "bg-green-900 text-green-200 border-green-700"
+                    : file.status === "tracked"
+                    ? "bg-blue-900 text-blue-200 border-blue-700"
+                    : "bg-yellow-900 text-yellow-200 border-yellow-700";
+                const statusLabel =
+                  file.status === "??" || file.status === "A"
+                    ? "New"
+                    : file.status === "tracked"
+                    ? "Tracked"
+                    : "Modified";
+
+                return (
+                  <button
+                    key={file.filepath}
+                    type="button"
+                    onClick={() => handleFileClick(file.filepath)}
+                    className="rounded border border-gray-600 bg-gray-900 hover:bg-gray-800 p-4 text-left transition-colors min-h-[80px] flex flex-col gap-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <svg
+                        className="w-5 h-5 text-blue-400 shrink-0 mt-0.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white break-words">
+                          {file.filepath.split("/").pop()}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {file.filepath.split("/").slice(0, -1).join("/") || "."}
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded border text-xs ${statusColor} shrink-0`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 py-8">
+              <svg
+                className="w-12 h-12 mx-auto mb-3 text-gray-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              <p className="text-sm">No .md files found in this project</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Shows all markdown files in the project&apos;s git repo
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Messages View */}
+      {viewMode === "messages" && (
+        <>
+          {data.error ? (
+            <div className="text-red-600">{data.error}</div>
+          ) : items.length === 0 ? (
+            <div className="text-gray-600">No JSON lines found.</div>
+          ) : (
+            <div className={condensed ? "flex flex-wrap gap-2" : "grid gap-3"}>
+          {dir === "desc" && pendingPrompts.map((pending) => (
+            <div
+              key={pending.id}
+              className="rounded border border-gray-600 bg-black p-2 sm:p-3 text-white opacity-50 animate-pulse"
+            >
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                <span className="px-2 py-0.5 rounded border text-xs bg-gray-50 text-gray-700 border-gray-200">user</span>
+                <span className="text-gray-400">{new Date(pending.timestamp).toLocaleTimeString()}</span>
+                <span className="text-gray-500 text-xs">Sending...</span>
+              </div>
+              <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+                {pending.text}
+              </div>
+            </div>
+          ))}
           {items.map((item, idx) => {
             // Get previous item's timestamp for duration calculation
             // In desc order, the "previous" message in time is actually the next item in the array
@@ -874,13 +1539,40 @@ export default function SessionDetails() {
               />
             );
           })}
+          {dir === "asc" && pendingPrompts.map((pending) => (
+            <div
+              key={pending.id}
+              className="rounded border border-gray-600 bg-black p-2 sm:p-3 text-white opacity-50 animate-pulse"
+            >
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                <span className="px-2 py-0.5 rounded border text-xs bg-gray-50 text-gray-700 border-gray-200">user</span>
+                <span className="text-gray-400">{new Date(pending.timestamp).toLocaleTimeString()}</span>
+                <span className="text-gray-500 text-xs">Sending...</span>
+              </div>
+              <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+                {pending.text}
+              </div>
+            </div>
+          ))}
 
           <div ref={sentinelRef} className="py-6 text-center text-sm text-gray-500">
             {nextCursor ? (fetcher.state === "idle" ? "Load more…" : "Loading…") : "End of results"}
           </div>
         </div>
+          )}
+        </>
+      )}
+
+      {/* File Viewer Modal */}
+      {selectedFile && fileContent && (
+        <FileViewer
+          filepath={selectedFile}
+          content={fileContent}
+          onClose={handleCloseFile}
+        />
       )}
     </main>
+    </>
   );
 }
 
@@ -894,40 +1586,9 @@ function stringifyJson(x: unknown): string {
   }
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) {
-    return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
-
-function getModelEmoji(model: string | undefined): string {
-  if (!model) return "";
-
-  // Opus models (most expensive/capable)
-  if (model.includes("opus")) return "💎";
-
-  // Sonnet models - omit
-  if (model.includes("sonnet")) return "";
-
-  // Haiku models (fast/cheap)
-  if (model.includes("haiku")) return "⚡";
-
-  // All other models
-  return "❓";
-}
-
-
 function SafePre({ children, className = "" }: { children: string; className?: string }) {
   return (
-    <pre className={`text-xs sm:text-sm whitespace-pre-wrap break-words break-all max-w-full ${className}`}>
+    <pre className={`text-sm sm:text-base whitespace-pre-wrap break-words break-all max-w-full ${className}`}>
       <code>{children}</code>
     </pre>
   );
@@ -952,6 +1613,94 @@ function ContextIndicator({ ctx }: { ctx?: { used?: number; limit?: number; pct?
   );
 }
 
+function formatTokens(n: number, short?: boolean): string {
+  if (n >= 1000000) return `${Math.round(n / 1000000)}M`;
+  if (n >= 1000) return short ? `${Math.round(n / 1000)}` : `${Math.round(n / 1000)}K`;
+  return String(n);
+}
+
+function ContextDisplay({ currentCtx, liveMetrics, compact }: {
+  currentCtx?: { used?: number; limit?: number; pct?: number };
+  liveMetrics?: { context_remaining_pct?: number | null; context_size?: number | null } | null;
+  compact?: boolean;
+}) {
+  // Prefer liveMetrics for accurate context info
+  const remainingPct = liveMetrics?.context_remaining_pct;
+  const contextSize = liveMetrics?.context_size;
+  const usedPct = typeof remainingPct === 'number' ? 100 - remainingPct : null;
+
+  // Calculate used tokens from liveMetrics or fall back to currentCtx
+  let used: number | null = null;
+  let limit: number | null = null;
+
+  if (contextSize && typeof usedPct === 'number') {
+    limit = contextSize;
+    used = Math.round((usedPct / 100) * contextSize);
+  } else if (currentCtx?.used) {
+    used = currentCtx.used;
+    limit = currentCtx.limit ?? null;
+  }
+
+  // Determine percentage
+  const pct = usedPct ?? (currentCtx?.pct ? currentCtx.pct * 100 : null);
+
+  if (used === null && pct === null) return null;
+
+  // Color based on usage percentage
+  const color = pct !== null
+    ? pct > 80 ? "#ef4444" : pct > 50 ? "#f59e0b" : "#22c55e"
+    : "#6b7280";
+
+  const pctDisplay = pct !== null ? Math.round(pct) : null;
+
+  // Compact: single line for mobile
+  if (compact) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10px]"
+        title={used !== null && limit !== null ? `Context: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens` : 'Context usage'}
+      >
+        {pctDisplay !== null && (
+          <span className="relative inline-block h-1 w-8 rounded bg-gray-700 overflow-hidden align-middle">
+            <span
+              className="absolute left-0 top-0 h-1 rounded"
+              style={{ width: `${pctDisplay}%`, backgroundColor: color }}
+            />
+          </span>
+        )}
+        <span style={{ color }}>{pctDisplay !== null ? `${pctDisplay}%` : ''}</span>
+      </span>
+    );
+  }
+
+  // Desktop: two lines
+  return (
+    <span
+      className="inline-flex flex-col items-start text-xs leading-tight"
+      title={used !== null && limit !== null ? `Context: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens` : 'Context usage'}
+    >
+      <span className="inline-flex items-center gap-1">
+        {pctDisplay !== null && (
+          <span className="relative inline-block h-1.5 w-12 rounded bg-gray-700 overflow-hidden align-middle">
+            <span
+              className="absolute left-0 top-0 h-1.5 rounded transition-all"
+              style={{ width: `${pctDisplay}%`, backgroundColor: color }}
+            />
+          </span>
+        )}
+        <span style={{ color }}>
+          {pctDisplay !== null ? `${pctDisplay}%` : ''}
+        </span>
+      </span>
+      {used !== null && (
+        <span className="text-gray-500">
+          {formatTokens(used, true)}/{limit ? formatTokens(limit) : '?'}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function looksLikeMarkdown(text: string): boolean {
   if (!text) return false;
   if (text.includes("```")) return true; // fenced code
@@ -966,12 +1715,12 @@ function looksLikeMarkdown(text: string): boolean {
 function TextOrMarkdown({ text }: { text: string }) {
   if (looksLikeMarkdown(text)) {
     return (
-      <div className="text-xs text-gray-100  max-w-full overflow-x-hidden">
+      <div className="text-sm sm:text-base text-gray-100 max-w-full overflow-x-hidden">
         <ReactMarkdown
           components={{
-            h1: ({ children }) => <h1 className="text-lg sm:text-xl font-semibold mt-3 mb-1 break-words">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-base sm:text-lg font-semibold mt-3 mb-1 break-words">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1 break-words">{children}</h3>,
+            h1: ({ children }) => <h1 className="text-xl sm:text-2xl font-semibold mt-3 mb-1 break-words">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-lg sm:text-xl font-semibold mt-3 mb-1 break-words">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-base sm:text-lg font-semibold mt-2 mb-1 break-words">{children}</h3>,
             p: ({ children }) => (
               <p className="my-2 whitespace-pre-wrap break-words break-all">{children}</p>
             ),
@@ -987,7 +1736,7 @@ function TextOrMarkdown({ text }: { text: string }) {
               const content = String(children ?? "");
               const isInline = !className?.includes('language-');
               if (isInline) {
-                return <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-100 text-sm break-words">{content}</code>;
+                return <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-100 text-base break-words">{content}</code>;
               }
               return <SafePre className="mt-2">{content}</SafePre>;
             },
@@ -997,7 +1746,7 @@ function TextOrMarkdown({ text }: { text: string }) {
             ),
             table: ({ children }) => (
               <div className="overflow-x-auto max-w-full">
-                <table className="w-full text-left text-sm border-collapse">{children}</table>
+                <table className="w-full text-left text-base border-collapse">{children}</table>
               </div>
             ),
             th: ({ children }) => <th className="border-b border-gray-700 px-2 py-1 font-medium">{children}</th>,
@@ -1011,7 +1760,7 @@ function TextOrMarkdown({ text }: { text: string }) {
   }
 
   return (
-    <div className="text-sm sm:text-base text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
+    <div className="text-base sm:text-lg text-gray-100 whitespace-pre-wrap break-words break-all max-w-full">
       {text}
     </div>
   );
@@ -1369,6 +2118,51 @@ function EntryCard({
         );
       }
 
+      // Custom rendering for AskUserQuestion
+      const questions = Array.isArray(seg?.input?.questions) ? seg.input.questions : null;
+      if (name === "AskUserQuestion" && questions) {
+        return (
+          <div key={i} className="rounded border border-purple-800 bg-purple-950 p-2 sm:p-3 max-w-full overflow-x-hidden">
+            <div className="mb-2 flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1">
+                <span>❓</span>
+                <Pill tone="info">{name}</Pill>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {questions.map((q: any, j: number) => (
+                <div key={j} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {q.header && <Pill>{q.header}</Pill>}
+                  </div>
+                  <div className="text-sm text-gray-100 font-medium">{q.question}</div>
+                  <div className="ml-2 space-y-1.5">
+                    {(q.options || []).map((opt: any, k: number) => (
+                      <div key={k} className="flex items-start gap-2 text-sm">
+                        <span className="text-purple-400 mt-0.5">{q.multiSelect ? "☐" : "○"}</span>
+                        <div>
+                          <div className="text-gray-200">
+                            {opt.label?.includes("(Recommended)") ? (
+                              <>
+                                {opt.label.replace("(Recommended)", "")}
+                                <span className="text-green-400 text-xs ml-1">(Recommended)</span>
+                              </>
+                            ) : opt.label}
+                          </div>
+                          {opt.description && (
+                            <div className="text-xs text-gray-500">{opt.description}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       // Default tool_use rendering
       return (
         <div key={i} className="rounded border border-blue-800 bg-blue-950 p-2 sm:p-3">
@@ -1508,6 +2302,98 @@ function EntryCard({
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function PromptForm({ onPromptSubmit }: { onPromptSubmit: (text: string) => void }) {
+  const fetcher = useFetcher<typeof action>();
+  const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState<ModelValue>(DEFAULT_MODEL);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isSubmitting = fetcher.state === "submitting";
+  const result = fetcher.data;
+
+  useEffect(() => {
+    if (result?.success && fetcher.state === "idle") {
+      setPrompt("");
+    }
+  }, [result, fetcher.state]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim() || isSubmitting) return;
+    const promptText = prompt;
+    onPromptSubmit(promptText);
+    fetcher.submit({ prompt: promptText, model }, { method: "post" });
+
+    // Fallback: clear this specific prompt after 10 seconds if it's still pending
+    setTimeout(() => {
+      console.log("[PromptForm] Timeout reached, checking for stale pending prompts");
+    }, 10000);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  };
+
+  return (
+    <div className="rounded border border-blue-800 bg-blue-950/30 p-4 mb-4">
+      <h2 className="text-sm font-semibold text-gray-200 mb-3">Send Prompt to Claude</h2>
+      <form onSubmit={handleSubmit}>
+        <div className="mb-3">
+          <label htmlFor="model-select" className="block text-xs text-gray-400 mb-2">
+            Model
+          </label>
+          <select
+            id="model-select"
+            name="model"
+            value={model}
+            onChange={(e) => setModel(e.target.value as ModelValue)}
+            disabled={isSubmitting}
+            className="w-full p-2 rounded border border-gray-600 bg-gray-900 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {MODEL_OPTIONS.map(({ value, label, emoji }) => (
+              <option key={value} value={value}>
+                {emoji && `${emoji} `}{label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <textarea
+          ref={textareaRef}
+          name="prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Enter your prompt... (Cmd+Enter to submit)"
+          disabled={isSubmitting}
+          className="w-full min-h-24 p-3 rounded border border-gray-600 bg-gray-900 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y disabled:opacity-50 disabled:cursor-not-allowed"
+          rows={3}
+        />
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-400">
+            Tip: Press Cmd+Enter to submit
+          </div>
+          <button
+            type="submit"
+            disabled={!prompt.trim() || isSubmitting}
+            className="px-4 py-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSubmitting ? "Sending..." : "Send to Claude"}
+          </button>
+        </div>
+        {result && fetcher.state === "idle" && !result.success && (
+          <div className="mt-3 text-sm text-red-400 border border-red-800 bg-red-950/30 rounded p-3">
+            <div className="font-semibold mb-1">Error:</div>
+            <div>{result.error || "Failed to send prompt"}</div>
+          </div>
+        )}
+      </form>
     </div>
   );
 }

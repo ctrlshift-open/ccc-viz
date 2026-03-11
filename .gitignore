@@ -19,3 +19,10 @@ tmux-urls.cfg
 cc-viz-*.tgz
 
 test-results/.last-run.json
+.playwright-mcp
+
+# Ralph agent
+.ralph/
+.ralph-stop
+ralph-archive/
+agent-chrome-devtools

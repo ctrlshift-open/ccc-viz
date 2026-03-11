@@ -24,6 +24,7 @@ class FileTailer {
   private watcher: FSWatcher | null = null;
   private reading = false;
   private disposed = false;
+  private pendingRead = false;
   private disposeTimer: ReturnType<typeof setTimeout> | null = null;
   private onDispose: (() => void) | null = null;
   private lastAppendAt: number | null = null;
@@ -113,8 +114,16 @@ class FileTailer {
   }
 
   private async readNew() {
-    if (this.reading || this.disposed) return;
+    if (this.disposed) return;
+    if (this.reading) {
+      // Another read is in progress, mark that we need to read again after it completes
+      console.log("[FileTailer] Read already in progress, marking pendingRead=true");
+      this.pendingRead = true;
+      return;
+    }
+
     this.reading = true;
+    this.pendingRead = false;
     try {
       const st = await fsStat(this.filePath).catch(() => null);
       if (!st) return;
@@ -125,6 +134,7 @@ class FileTailer {
       }
       const toRead = st.size - this.offset;
       if (toRead <= 0) return;
+      console.log(`[FileTailer] Reading ${toRead} bytes from offset ${this.offset}`);
 
       await this.ensureOpen();
       if (!this.fh) return;
@@ -173,12 +183,18 @@ class FileTailer {
           }
         }
         if (batch.length > 0) {
+          console.log(`[FileTailer] Broadcasting ${batch.length} new lines to ${this.subs.size} subscribers`);
           this.lastAppendAt = Date.now();
           this.broadcast(batch);
         }
       }
     } finally {
       this.reading = false;
+      // If another read was requested while we were busy, trigger it now
+      if (this.pendingRead && !this.disposed) {
+        console.log("[FileTailer] Pending read detected, triggering another read");
+        setImmediate(() => this.readNew());
+      }
     }
   }
 

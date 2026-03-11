@@ -7,6 +7,7 @@ export function getMessageTypeEmoji(key: string): string {
   
   // Handle tool use cases first
   if (subType === 'tool_use') {
+    if (toolName === 'AskUserQuestion') return '❓';
     if (toolName === 'TodoWrite') return '📝';
     return '🔧';
   }
