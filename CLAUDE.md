@@ -18,9 +18,11 @@ pnpm build        # Build client/server bundles to build/
 pnpm start        # Run production server
 
 # Background process management (custom scripts)
-pnpm bg:start     # Start dev server in background
-pnpm bg:logs      # Watch logs in real-time
-pnpm bg:stop      # Stop background server
+pnpm bg:up        # Start dev server in background
+pnpm bg:down      # Stop background server
+pnpm bg:status    # Check if server is running
+pnpm bg:logs      # Last 50 lines of logs
+pnpm bg:logs-watch # Watch logs in real-time
 ```
 
 ## Architecture
